@@ -32,7 +32,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://user:pass@db:5432/new_bal_db
     volumes:
       - .:/app
-    command: ["/app/entrypoint.sh"]
+    command: ["sh", "/app/entrypoint.sh"]
 
 volumes:
   pgdata:
