@@ -8,6 +8,7 @@ from aiogram.types import Message, CallbackQuery
 from dotenv import load_dotenv
 from db.session import async_session
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from db.models import Survey, Base
 from bot.keyboards import (yes_no_kb, pair_or_single_kb, studying_or_graduated_kb,
                            confirm_kb, back_kb, back_reply_kb, review_kb)
@@ -35,9 +36,18 @@ class SurveyStates(StatesGroup):
 
 @dp.message(Command("start"))
 async def cmd_start(message: Message, state: FSMContext):
+    # prevent re-registration if user already submitted
+    telegram_id = str(message.from_user.id)
+    async with async_session() as session:
+        q = await session.execute(select(Survey).filter_by(telegram_id=telegram_id))
+        existing = q.scalars().first()
+    if existing:
+        await message.answer("Вы уже заполнили анкету — повторная регистрация запрещена. Если нужно изменить данные, обратитесь к администратору.")
+        return
+
     await state.clear()
-    # initialize history stack
-    await state.update_data(_history=[], telegram_id=str(message.from_user.id), telegram_username=message.from_user.username)
+    # initialize history stack and store telegram identifiers
+    await state.update_data(_history=[], telegram_id=telegram_id, telegram_username=message.from_user.username)
     await state.set_state(SurveyStates.consent)
     await message.answer("1) Согласны ли вы со сбором персональных данных?", reply_markup=yes_no_kb())
 
