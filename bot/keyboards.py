@@ -3,7 +3,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeybo
 def yes_no_kb():
     # InlineKeyboardMarkup expects inline_keyboard as list of rows (each row is list of buttons)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Да", callback_data="yes"), InlineKeyboardButton(text="Нет", callback_data="no")]
+        [InlineKeyboardButton(text="Да", callback_data="yes")]
     ])
     return kb
 

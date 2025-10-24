@@ -52,11 +52,9 @@ async def cmd_start(message: Message, state: FSMContext):
     await message.answer("1) Согласны ли вы со сбором персональных данных?", reply_markup=yes_no_kb())
 
 
-@dp.callback_query(lambda c: c.data in ["yes", "no"])
+@dp.callback_query(lambda c: c.data == "yes")
 async def consent_cb(query: CallbackQuery, state: FSMContext):
-    if query.data == "no":
-        await query.answer("Нужно согласие, чтобы продолжить.")
-        return
+    # only positive consent is available in the keyboard
     await state.update_data(consent=True)
     # push previous state
     data = await state.get_data()
