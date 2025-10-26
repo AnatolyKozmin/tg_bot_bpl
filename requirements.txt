@@ -23,3 +23,16 @@ SQLAlchemy==2.0.44
 typing-inspection==0.4.2
 typing_extensions==4.15.0
 yarl==1.22.0
+
+# Redis для FSM storage и Celery broker
+redis==5.2.1
+
+# Celery для асинхронной рассылки билетов
+celery==5.4.0
+
+# Генерация билетов с QR-кодами
+Pillow==11.0.0
+qrcode[pil]==8.0
+
+# Мониторинг (опционально)
+prometheus-client==0.21.0
