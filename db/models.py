@@ -24,8 +24,10 @@ class Survey(Base):
     
     # Данные о билете
     pair_or_single = Column(String(16))
-    ticket_sent = Column(Boolean, default=False)  # Отправлен ли билет
-    ticket_cancelled = Column(Boolean, default=False)  # Отменен ли билет
+    ticket_generated = Column(Boolean, default=False)  # Билет сгенерирован?
+    ticket_path = Column(String(512), nullable=True)   # Путь к файлу билета
+    ticket_sent = Column(Boolean, default=False)       # Билет отправлен?
+    ticket_cancelled = Column(Boolean, default=False)  # Билет отменен?
     
     # Данные партнера
     partner_status = Column(String(32), nullable=True)  # studying/graduated
@@ -36,7 +38,12 @@ class Survey(Base):
     partner_student_id = Column(String(6), nullable=True)
     partner_diploma = Column(String(64), nullable=True)
     
-    # Метаданные
+    # Метаданные и временные метки
+    registration_started_at = Column(DateTime, nullable=True)  # Начало заполнения анкеты
+    registration_completed_at = Column(DateTime, nullable=True)  # Завершение регистрации
+    ticket_generated_at = Column(DateTime, nullable=True)  # Когда билет сгенерирован
+    ticket_sent_at = Column(DateTime, nullable=True)  # Когда билет отправлен
+    ticket_cancelled_at = Column(DateTime, nullable=True)  # Когда билет отменен
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

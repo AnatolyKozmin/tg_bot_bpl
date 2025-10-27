@@ -40,9 +40,10 @@ logger = logging.getLogger(__name__)
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
-def generate_and_send_ticket(self, user_data: dict):
+def generate_ticket(self, user_id: int, user_data: dict):
     """
-    Генерирует билет с QR-кодом и отправляет пользователю.
+    Генерирует билет с QR-кодом и СОХРАНЯЕТ на сервере (не отправляет).
+    Отправка будет по команде /rass.
     
     Args:
         user_data: {
@@ -126,31 +127,44 @@ def generate_and_send_ticket(self, user_data: dict):
         qr_position = (900, 300)  # Настройте под ваш шаблон
         template.paste(qr_img, qr_position)
         
-        # 6. Сохраняем в буфер
-        bio = io.BytesIO()
-        template.save(bio, 'PNG')
-        bio.seek(0)
+        # 6. Сохраняем билет на сервер (не отправляем)
+        tickets_dir = "tickets"
+        os.makedirs(tickets_dir, exist_ok=True)
         
-        # 7. Отправляем через aiogram
-        from bot.sender import send_ticket_to_user
+        ticket_filename = f"ticket_{user_data['telegram_id']}.png"
+        ticket_path = os.path.join(tickets_dir, ticket_filename)
         
-        result = asyncio.run(send_ticket_to_user(
-            telegram_id=user_data['telegram_id'],
-            photo=bio,
-            caption=(
-                f"🎉 Ваш билет на мероприятие!\n\n"
-                f"👤 {user_data['fio']}\n"
-                f"📚 Группа: {user_data['group']}\n"
-                f"🎫 Тип: {ticket_type_text}\n\n"
-                f"⚠️ Сохраните этот билет и предъявите на входе!"
-            )
-        ))
+        template.save(ticket_path, 'PNG')
+        logger.info(f"✅ Ticket saved: {ticket_path}")
         
-        if result:
-            logger.info(f"✅ Ticket sent successfully to user {user_data['id']}")
-            return {'status': 'success', 'user_id': user_data['id'], 'message': 'Ticket sent'}
-        else:
-            raise Exception("Failed to send ticket")
+        # 7. Обновляем статус в БД
+        from db.session import async_session
+        from db.models import Survey
+        from sqlalchemy import update
+        from datetime import datetime
+        
+        async def update_ticket_status():
+            async with async_session() as session:
+                await session.execute(
+                    update(Survey)
+                    .where(Survey.id == user_id)
+                    .values(
+                        ticket_generated=True,
+                        ticket_path=ticket_path,
+                        ticket_generated_at=datetime.utcnow()
+                    )
+                )
+                await session.commit()
+        
+        asyncio.run(update_ticket_status())
+        
+        logger.info(f"✅ Ticket generated for user {user_data['id']}: {ticket_path}")
+        return {
+            'status': 'success', 
+            'user_id': user_data['id'], 
+            'ticket_path': ticket_path,
+            'message': 'Ticket generated and saved'
+        }
         
     except Exception as exc:
         logger.error(f"❌ Error generating ticket for user {user_data['id']}: {exc}")
@@ -164,31 +178,106 @@ def generate_and_send_ticket(self, user_data: dict):
             return {'status': 'error', 'user_id': user_data['id'], 'message': str(exc)}
 
 
-@celery_app.task
-def broadcast_tickets_task(users_data: list):
+@celery_app.task(bind=True, max_retries=3)
+def send_existing_ticket(self, user_id: int, telegram_id: str, ticket_path: str):
     """
-    Запускает генерацию билетов для всех пользователей.
+    Отправляет УЖЕ СОЗДАННЫЙ билет пользователю.
+    Используется при команде /rass.
+    """
+    try:
+        from bot.sender import send_ticket_file
+        from db.session import async_session
+        from db.models import Survey
+        from sqlalchemy import update
+        from datetime import datetime
+        
+        # Проверяем что файл существует
+        if not os.path.exists(ticket_path):
+            raise FileNotFoundError(f"Ticket not found: {ticket_path}")
+        
+        # Отправляем билет
+        result = asyncio.run(send_ticket_file(telegram_id, ticket_path))
+        
+        if result:
+            # Обновляем статус в БД
+            async def update_sent_status():
+                async with async_session() as session:
+                    await session.execute(
+                        update(Survey)
+                        .where(Survey.id == user_id)
+                        .values(
+                            ticket_sent=True,
+                            ticket_sent_at=datetime.utcnow()
+                        )
+                    )
+                    await session.commit()
+            
+            asyncio.run(update_sent_status())
+            logger.info(f"✅ Ticket sent to user {telegram_id}")
+            return {'status': 'success', 'user_id': user_id}
+        else:
+            raise Exception("Failed to send ticket")
+            
+    except Exception as exc:
+        logger.error(f"❌ Error sending ticket to {telegram_id}: {exc}")
+        if self.request.retries < self.max_retries:
+            raise self.retry(exc=exc, countdown=60)
+        return {'status': 'error', 'user_id': user_id, 'message': str(exc)}
+
+
+@celery_app.task
+def broadcast_tickets_task(tickets_to_send: list):
+    """
+    Отправляет готовые билеты всем пользователям.
+    Используется при команде /rass.
     
     Args:
-        users_data: Список словарей с данными пользователей
-    
-    Returns:
-        dict: Статистика рассылки
+        tickets_to_send: Список [{'user_id': int, 'telegram_id': str, 'ticket_path': str}, ...]
     """
     from celery import group
     
-    logger.info(f"📢 Starting broadcast for {len(users_data)} users")
+    logger.info(f"📢 Starting broadcast for {len(tickets_to_send)} users")
     
-    # Создаем группу задач
-    job = group(generate_and_send_ticket.s(user) for user in users_data)
+    # Создаем группу задач для отправки
+    job = group(
+        send_existing_ticket.s(
+            user_id=ticket['user_id'],
+            telegram_id=ticket['telegram_id'],
+            ticket_path=ticket['ticket_path']
+        ) 
+        for ticket in tickets_to_send
+    )
     result = job.apply_async()
     
-    # Можно дождаться результатов (но это блокирующая операция)
-    # results = result.get(timeout=3600)  # 1 час максимум
+    return {
+        'status': 'started',
+        'total_users': len(tickets_to_send),
+        'message': f'Broadcast started for {len(tickets_to_send)} users'
+    }
+
+
+@celery_app.task
+def generate_tickets_batch(users_data: list):
+    """
+    Генерирует билеты для списка пользователей (после регистрации).
+    НЕ отправляет, только создает и сохраняет.
+    """
+    from celery import group
+    
+    logger.info(f"🎫 Generating tickets for {len(users_data)} users")
+    
+    job = group(
+        generate_ticket.s(
+            user_id=user['id'],
+            user_data=user
+        ) 
+        for user in users_data
+    )
+    result = job.apply_async()
     
     return {
         'status': 'started',
         'total_users': len(users_data),
-        'message': f'Broadcast started for {len(users_data)} users'
+        'message': f'Ticket generation started for {len(users_data)} users'
     }
 
