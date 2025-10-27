@@ -12,17 +12,17 @@ import os
 # Путь к шрифту (автоопределение: Docker или локально)
 if os.path.exists("/app"):
     # На сервере в Docker
-    FONT_PATH = "/app/denistina_en (2).ttf"
+    FONT_PATH = "/app/denistina_en.ttf"
     FONT_PATH_FALLBACK = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 else:
     # На локальной машине
-    FONT_PATH = "denistina_en (2).ttf"
+    FONT_PATH = "denistina_en.ttf"
     FONT_PATH_FALLBACK = "DejaVuSans-Bold.ttf"
 
 # Размеры шрифтов (в пикселях)
 FONT_SIZES = {
-    'name': 100,         # Фамилия и Имя
-    'telegram_id': 35,  # Telegram ID
+    'name': 500,         # Фамилия и Имя
+    'telegram_id': 500,  # Telegram ID
 }
 
 # =============================================================================
@@ -32,8 +32,8 @@ FONT_SIZES = {
 
 TEXT_POSITIONS = {
     'qr_code': (750, 1080),          # Центр QR-кода
-    'telegram_id': (600, 1300),      # Telegram ID (под QR)
-    'name': (600, 540),             # Фамилия Имя (под telegram_id)
+    'telegram_id': (750, 1300),      # Telegram ID (под QR)
+    'name': (750, 1540),             # Фамилия Имя (под telegram_id)
 }
 
 # =============================================================================

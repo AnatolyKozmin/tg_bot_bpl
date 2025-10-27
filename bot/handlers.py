@@ -126,7 +126,20 @@ async def cmd_generate_tickets(message: Message):
         from tasks import generate_ticket
         task_ids = []
         for user in users:
-            task = generate_ticket.delay(user.id)
+            # Собираем данные пользователя для генерации билета
+            user_data = {
+                'id': user.id,
+                'telegram_id': user.telegram_id,
+                'fio': user.fio,
+                'faculty': user.faculty,
+                'course': user.course,
+                'group': user.group,
+                'student_id': user.student_id,
+                'diploma_number': user.diploma_number,
+                'ticket_type': user.pair_or_single,
+                'partner_fio': user.partner_fio,
+            }
+            task = generate_ticket.delay(user.id, user_data)
             task_ids.append(task.id)
         
         await message.answer(
