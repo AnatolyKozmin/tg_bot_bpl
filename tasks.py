@@ -16,6 +16,12 @@ from PIL import Image, ImageDraw, ImageFont
 import qrcode
 from dotenv import load_dotenv
 import logging
+from datetime import datetime
+from sqlalchemy import update
+
+# Импорт db модулей (нужны в начале для Celery!)
+from db.session import async_session
+from db.models import Survey
 
 load_dotenv()
 
@@ -206,11 +212,6 @@ def generate_ticket(self, user_id: int, user_data: dict):
         logger.info(f"✅ Ticket saved: {ticket_path}")
         
         # 7. Обновляем статус в БД
-        from db.session import async_session
-        from db.models import Survey
-        from sqlalchemy import update
-        from datetime import datetime
-        
         async def update_ticket_status():
             async with async_session() as session:
                 await session.execute(
@@ -254,10 +255,6 @@ def send_existing_ticket(self, user_id: int, telegram_id: str, ticket_path: str)
     """
     try:
         from bot.sender import send_ticket_file
-        from db.session import async_session
-        from db.models import Survey
-        from sqlalchemy import update
-        from datetime import datetime
         
         # Проверяем что файл существует
         if not os.path.exists(ticket_path):
