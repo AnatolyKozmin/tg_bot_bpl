@@ -296,6 +296,8 @@ def broadcast_tickets_task(tickets_to_send: list):
     """
     from celery import group
     
+    # DEBUG: Логируем ДО ВСЕГО
+    logger.info(f"🚀 broadcast_tickets_task STARTED! Type: {type(tickets_to_send)}, Length: {len(tickets_to_send) if tickets_to_send else 0}")
     logger.info(f"📢 Starting broadcast for {len(tickets_to_send)} users")
     
     # DEBUG: Показываем первые 3 записи
