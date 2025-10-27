@@ -1,0 +1,109 @@
+version: '3.8'
+
+services:
+  # PostgreSQL с оптимизацией для высокой нагрузки
+  db:
+    image: postgres:15
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pass}
+      POSTGRES_DB: ${DB_NAME:-new_bal_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    command: >
+      postgres
+      -c max_connections=500
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+      -c maintenance_work_mem=64MB
+      -c checkpoint_completion_target=0.9
+      -c wal_buffers=16MB
+      -c default_statistics_target=100
+      -c random_page_cost=1.1
+      -c effective_io_concurrency=200
+      -c work_mem=4MB
+      -c min_wal_size=1GB
+      -c max_wal_size=4GB
+
+  # Redis для FSM storage и Celery broker
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Telegram Bot
+  bot:
+    build: .
+    restart: always
+    depends_on:
+      - db
+      - redis
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-user}:${DB_PASSWORD:-pass}@db:5432/${DB_NAME:-new_bal_db}
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_BROKER_URL=redis://redis:6379/1
+      - ADMIN_IDS=${ADMIN_IDS}
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - ./tickets:/app/tickets
+    command: ["python", "main.py"]
+
+  # Celery Worker для рассылки билетов
+  celery_worker:
+    build: .
+    restart: always
+    depends_on:
+      - redis
+      - db
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-user}:${DB_PASSWORD:-pass}@db:5432/${DB_NAME:-new_bal_db}
+      - REDIS_BROKER_URL=redis://redis:6379/1
+      - TICKET_TEMPLATE_PATH=/app/ticket_template.png
+    volumes:
+      - .:/app
+      - ./logs:/app/logs
+      - ./tickets:/app/tickets
+    command: ["celery", "-A", "tasks", "worker", "--loglevel=info", "--concurrency=5"]
+
+  # Flower - мониторинг Celery
+  flower:
+    build: .
+    restart: always
+    depends_on:
+      - redis
+      - celery_worker
+    environment:
+      - REDIS_BROKER_URL=redis://redis:6379/1
+    ports:
+      - "5555:5555"
+    command: ["celery", "-A", "tasks", "flower", "--port=5555"]
+
+  # PgAdmin для управления БД
+  pgadmin:
+    image: dpage/pgadmin4:8
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:-admin@example.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:-admin}
+    ports:
+      - "8080:80"
+    depends_on:
+      - db
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+
+volumes:
+  pgdata:
+  redis_data:
+  pgadmin_data:
+

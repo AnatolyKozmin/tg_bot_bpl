@@ -21,6 +21,8 @@ def upgrade():
     op.add_column('surveys', sa.Column('diploma_number', sa.String(length=64), nullable=True))
     
     # Поля для управления билетами
+    op.add_column('surveys', sa.Column('ticket_generated', sa.Boolean(), server_default='false', nullable=False))
+    op.add_column('surveys', sa.Column('ticket_path', sa.String(length=512), nullable=True))
     op.add_column('surveys', sa.Column('ticket_sent', sa.Boolean(), server_default='false', nullable=False))
     op.add_column('surveys', sa.Column('ticket_cancelled', sa.Boolean(), server_default='false', nullable=False))
     
@@ -28,7 +30,12 @@ def upgrade():
     op.add_column('surveys', sa.Column('partner_faculty', sa.String(length=64), nullable=True))
     op.add_column('surveys', sa.Column('partner_course', sa.String(length=32), nullable=True))
     
-    # Метаданные
+    # Временные метки
+    op.add_column('surveys', sa.Column('registration_started_at', sa.DateTime(), nullable=True))
+    op.add_column('surveys', sa.Column('registration_completed_at', sa.DateTime(), nullable=True))
+    op.add_column('surveys', sa.Column('ticket_generated_at', sa.DateTime(), nullable=True))
+    op.add_column('surveys', sa.Column('ticket_sent_at', sa.DateTime(), nullable=True))
+    op.add_column('surveys', sa.Column('ticket_cancelled_at', sa.DateTime(), nullable=True))
     op.add_column('surveys', sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP'), nullable=True))
     
     # Изменяем длину поля student_id до 6 символов (было 64)
@@ -55,10 +62,17 @@ def upgrade():
 def downgrade():
     # Откат изменений
     op.drop_column('surveys', 'updated_at')
+    op.drop_column('surveys', 'ticket_cancelled_at')
+    op.drop_column('surveys', 'ticket_sent_at')
+    op.drop_column('surveys', 'ticket_generated_at')
+    op.drop_column('surveys', 'registration_completed_at')
+    op.drop_column('surveys', 'registration_started_at')
     op.drop_column('surveys', 'partner_course')
     op.drop_column('surveys', 'partner_faculty')
     op.drop_column('surveys', 'ticket_cancelled')
     op.drop_column('surveys', 'ticket_sent')
+    op.drop_column('surveys', 'ticket_path')
+    op.drop_column('surveys', 'ticket_generated')
     op.drop_column('surveys', 'diploma_number')
     op.drop_column('surveys', 'course')
     op.drop_column('surveys', 'faculty')
