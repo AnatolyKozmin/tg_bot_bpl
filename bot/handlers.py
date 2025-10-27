@@ -197,26 +197,23 @@ async def cmd_broadcast(message: Message):
             await message.answer("✅ Все билеты уже отправлены!")
             return
         
-        users_data = []
+        # Формируем данные для рассылки (ПРАВИЛЬНАЯ СТРУКТУРА!)
+        tickets_to_send = []
         for user in users:
-            users_data.append({
-                'id': user.id,
+            tickets_to_send.append({
+                'user_id': user.id,              # ✅ user_id (не id!)
                 'telegram_id': user.telegram_id,
-                'fio': user.fio,
-                'group': user.group,
-                'student_id': user.student_id,
-                'ticket_type': user.pair_or_single,
-                'partner_fio': user.partner_fio
+                'ticket_path': user.ticket_path  # ✅ ticket_path!
             })
         
         from tasks import broadcast_tickets_task
-        task = broadcast_tickets_task.delay(users_data)
+        task = broadcast_tickets_task.delay(tickets_to_send)
         
         await message.answer(
             f"✅ Рассылка запущена!\n\n"
-            f"📊 Всего пользователей: {len(users_data)}\n"
+            f"📊 Всего пользователей: {len(tickets_to_send)}\n"
             f"🔑 Task ID: `{task.id}`\n\n"
-            f"⏱ Примерное время: ~{len(users_data) * 0.05 / 60:.1f} минут",
+            f"⏱ Примерное время: ~{len(tickets_to_send) * 0.05 / 60:.1f} минут",
             parse_mode="Markdown"
         )
         
