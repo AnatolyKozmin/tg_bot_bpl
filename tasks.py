@@ -62,20 +62,49 @@ def generate_ticket(self, user_id: int, user_data: dict):
     try:
         logger.info(f"🎫 Generating ticket for user {user_data['id']}: {user_data['fio']}")
         
-        # 1. Генерируем QR-код
+        # 1. Загружаем конфигурацию
+        try:
+            from ticket_config import (
+                FONT_PATH, FONT_PATH_FALLBACK, FONT_SIZES, TEXT_POSITIONS, 
+                TEXT_COLORS, QR_CONFIG, QR_DATA_FORMAT
+            )
+        except ImportError:
+            logger.warning("⚠️ ticket_config.py not found, using defaults")
+            FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            FONT_PATH_FALLBACK = FONT_PATH
+            FONT_SIZES = {'name': 45, 'telegram_id': 35}
+            TEXT_POSITIONS = {
+                'qr_code': (600, 250),
+                'telegram_id': (600, 480),
+                'name': (600, 540)
+            }
+            TEXT_COLORS = {'name': 'black', 'telegram_id': '#555555'}
+            QR_CONFIG = {'size': (250, 250), 'box_size': 10, 'border': 2}
+            QR_DATA_FORMAT = "{telegram_id}"
+        
+        # 2. Генерируем QR-код
         qr = qrcode.QRCode(
             version=1,
             error_correction=qrcode.constants.ERROR_CORRECT_H,
-            box_size=10,
-            border=2,
+            box_size=QR_CONFIG.get('box_size', 10),
+            border=QR_CONFIG.get('border', 2),
         )
         
-        # Данные для QR-кода (можно изменить формат)
-        qr_data = f"EVENT_TICKET_{user_data['id']}_{user_data['telegram_id']}"
+        # Данные для QR-кода (только telegram_id)
+        qr_data = QR_DATA_FORMAT.format(telegram_id=user_data['telegram_id'])
         qr.add_data(qr_data)
         qr.make(fit=True)
         
         qr_img = qr.make_image(fill_color="black", back_color="white")
+        
+        # Разбиваем ФИО на части (Фамилия Имя)
+        fio_parts = user_data.get('fio', '').strip().split()
+        if len(fio_parts) >= 2:
+            name_text = f"{fio_parts[0]} {fio_parts[1]}"  # Фамилия Имя
+        elif len(fio_parts) == 1:
+            name_text = fio_parts[0]  # Только фамилия
+        else:
+            name_text = "Участник"  # Fallback
         
         # 2. Загружаем шаблон билета
         template_path = os.getenv("TICKET_TEMPLATE_PATH", "ticket_template.png")
@@ -91,41 +120,80 @@ def generate_ticket(self, user_id: int, user_data: dict):
         
         # 3. Загружаем шрифты
         try:
-            font_path = os.getenv("FONT_PATH", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
-            font_name = ImageFont.truetype(font_path, 50)
-            font_info = ImageFont.truetype(font_path, 35)
-            font_small = ImageFont.truetype(font_path, 25)
-        except:
-            logger.warning("⚠️ Custom font not found, using default")
-            font_name = ImageFont.load_default()
-            font_info = ImageFont.load_default()
-            font_small = ImageFont.load_default()
+            # Пытаемся загрузить кастомный шрифт
+            font_name = ImageFont.truetype(FONT_PATH, FONT_SIZES['name'])
+            font_tg_id = ImageFont.truetype(FONT_PATH, FONT_SIZES['telegram_id'])
+            logger.info(f"✅ Loaded custom font: {FONT_PATH}")
+        except Exception as e:
+            logger.warning(f"⚠️ Custom font not found: {e}, trying fallback")
+            try:
+                # Пытаемся загрузить запасной шрифт
+                font_name = ImageFont.truetype(FONT_PATH_FALLBACK, FONT_SIZES['name'])
+                font_tg_id = ImageFont.truetype(FONT_PATH_FALLBACK, FONT_SIZES['telegram_id'])
+                logger.info(f"✅ Loaded fallback font: {FONT_PATH_FALLBACK}")
+            except:
+                # Используем системный шрифт по умолчанию
+                logger.warning("⚠️ Using default system font")
+                font_name = ImageFont.load_default()
+                font_tg_id = ImageFont.load_default()
         
-        # 4. Накладываем текст на билет
-        # ВАЖНО: Настройте позиции под ваш шаблон!
+        # 4. Размещаем QR-код по центру
+        qr_img_resized = qr_img.resize(QR_CONFIG['size'])
         
-        # ФИО
-        draw.text((100, 150), user_data['fio'], fill="black", font=font_name)
+        # Вычисляем позицию для центрирования QR
+        qr_center = TEXT_POSITIONS['qr_code']
+        qr_paste_position = (
+            qr_center[0] - QR_CONFIG['size'][0] // 2,  # x - половина ширины
+            qr_center[1] - QR_CONFIG['size'][1] // 2   # y - половина высоты
+        )
+        template.paste(qr_img_resized, qr_paste_position)
         
-        # Группа
-        draw.text((100, 250), f"Группа: {user_data['group']}", fill="black", font=font_info)
+        # 5. Размещаем текст с ИДЕАЛЬНЫМ центрированием
         
-        # Студенческий билет
-        draw.text((100, 320), f"Студ. билет: {user_data['student_id']}", fill="black", font=font_info)
+        # Telegram ID (под QR-кодом)
+        tg_id_text = f"ID: {user_data['telegram_id']}"
         
-        # Тип билета
-        ticket_type_text = "ОДИНОЧНЫЙ" if user_data['ticket_type'] == 'single' else "ПАРНЫЙ"
-        draw.text((100, 390), f"Тип: {ticket_type_text}", fill="black", font=font_info)
+        # Вычисляем размер текста telegram_id
+        try:
+            # Для новых версий Pillow
+            bbox_tg_id = draw.textbbox((0, 0), tg_id_text, font=font_tg_id)
+            tg_id_width = bbox_tg_id[2] - bbox_tg_id[0]
+            tg_id_height = bbox_tg_id[3] - bbox_tg_id[1]
+        except AttributeError:
+            # Для старых версий Pillow
+            tg_id_width, tg_id_height = draw.textsize(tg_id_text, font=font_tg_id)
         
-        # Партнер (если есть)
-        if user_data.get('partner_fio'):
-            draw.text((100, 460), f"Партнёр: {user_data['partner_fio']}", fill="black", font=font_small)
+        # Центрируем telegram_id
+        tg_id_x = TEXT_POSITIONS['telegram_id'][0] - tg_id_width // 2
+        tg_id_y = TEXT_POSITIONS['telegram_id'][1] - tg_id_height // 2
         
-        # 5. Накладываем QR-код
-        qr_size = (250, 250)
-        qr_img = qr_img.resize(qr_size)
-        qr_position = (900, 300)  # Настройте под ваш шаблон
-        template.paste(qr_img, qr_position)
+        draw.text(
+            (tg_id_x, tg_id_y),
+            tg_id_text,
+            fill=TEXT_COLORS.get('telegram_id', '#555555'),
+            font=font_tg_id
+        )
+        
+        # Фамилия и Имя (под telegram_id)
+        
+        # Вычисляем размер текста имени
+        try:
+            bbox_name = draw.textbbox((0, 0), name_text, font=font_name)
+            name_width = bbox_name[2] - bbox_name[0]
+            name_height = bbox_name[3] - bbox_name[1]
+        except AttributeError:
+            name_width, name_height = draw.textsize(name_text, font=font_name)
+        
+        # Центрируем имя
+        name_x = TEXT_POSITIONS['name'][0] - name_width // 2
+        name_y = TEXT_POSITIONS['name'][1] - name_height // 2
+        
+        draw.text(
+            (name_x, name_y),
+            name_text,
+            fill=TEXT_COLORS.get('name', 'black'),
+            font=font_name
+        )
         
         # 6. Сохраняем билет на сервер (не отправляем)
         tickets_dir = "tickets"

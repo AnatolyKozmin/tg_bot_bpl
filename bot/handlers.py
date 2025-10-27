@@ -100,6 +100,48 @@ async def cmd_stats(message: Message):
     await message.answer(text, parse_mode="Markdown")
 
 
+@dp.message(Command("generate_tickets"))
+async def cmd_generate_tickets(message: Message):
+    """Генерация всех билетов"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ У вас нет доступа к этой команде.")
+        return
+    
+    await message.answer("🎫 Начинаю генерацию билетов...")
+    
+    try:
+        async with async_session() as session:
+            result = await session.execute(
+                select(Survey).where(
+                    (Survey.ticket_cancelled == False) & 
+                    (Survey.ticket_generated == False)
+                )
+            )
+            users = result.scalars().all()
+        
+        if not users:
+            await message.answer("✅ Все билеты уже сгенерированы!")
+            return
+        
+        from tasks import generate_ticket
+        task_ids = []
+        for user in users:
+            task = generate_ticket.delay(user.id)
+            task_ids.append(task.id)
+        
+        await message.answer(
+            f"✅ Генерация запущена!\n\n"
+            f"📊 Билетов к генерации: {len(users)}\n"
+            f"⏱ Примерное время: ~{len(users) * 2 / 60:.1f} минут\n\n"
+            f"Проверить статус: /stats",
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Generate tickets error: {e}")
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
 @dp.message(Command("rass"))
 async def cmd_broadcast(message: Message):
     """Рассылка билетов"""
@@ -107,17 +149,39 @@ async def cmd_broadcast(message: Message):
         await message.answer("❌ У вас нет доступа к этой команде.")
         return
     
-    await message.answer("🚀 Начинаю рассылку билетов...")
+    await message.answer("🚀 Проверяю готовность...")
     
     try:
         async with async_session() as session:
+            # Проверка: все ли билеты сгенерированы
+            not_generated = await session.execute(
+                select(Survey).where(
+                    (Survey.ticket_cancelled == False) & 
+                    (Survey.ticket_generated == False)
+                )
+            )
+            not_generated_count = len(not_generated.scalars().all())
+            
+            if not_generated_count > 0:
+                await message.answer(
+                    f"⚠️ Не все билеты сгенерированы!\n\n"
+                    f"❌ Не сгенерировано: {not_generated_count}\n\n"
+                    f"Сначала запустите: /generate_tickets"
+                )
+                return
+            
+            # Получаем пользователей с готовыми билетами
             result = await session.execute(
-                select(Survey).where(Survey.ticket_cancelled == False)
+                select(Survey).where(
+                    (Survey.ticket_cancelled == False) &
+                    (Survey.ticket_generated == True) &
+                    (Survey.ticket_sent == False)
+                )
             )
             users = result.scalars().all()
         
         if not users:
-            await message.answer("❌ Нет зарегистрированных пользователей.")
+            await message.answer("✅ Все билеты уже отправлены!")
             return
         
         users_data = []
