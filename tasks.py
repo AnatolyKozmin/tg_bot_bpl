@@ -20,7 +20,7 @@ from datetime import datetime
 from sqlalchemy import update
 
 # Импорт db модулей (нужны в начале для Celery!)
-from db.session import async_session
+from db.session import sync_session  # Используем SYNC сессию для Celery!
 from db.models import Survey
 
 load_dotenv()
@@ -211,21 +211,18 @@ def generate_ticket(self, user_id: int, user_data: dict):
         template.save(ticket_path, 'PNG')
         logger.info(f"✅ Ticket saved: {ticket_path}")
         
-        # 7. Обновляем статус в БД
-        async def update_ticket_status():
-            async with async_session() as session:
-                await session.execute(
-                    update(Survey)
-                    .where(Survey.id == user_id)
-                    .values(
-                        ticket_generated=True,
-                        ticket_path=ticket_path,
-                        ticket_generated_at=datetime.utcnow()
-                    )
+        # 7. Обновляем статус в БД (СИНХРОННО для Celery!)
+        with sync_session() as session:
+            session.execute(
+                update(Survey)
+                .where(Survey.id == user_id)
+                .values(
+                    ticket_generated=True,
+                    ticket_path=ticket_path,
+                    ticket_generated_at=datetime.utcnow()
                 )
-                await session.commit()
-        
-        asyncio.run(update_ticket_status())
+            )
+            session.commit()
         
         logger.info(f"✅ Ticket generated for user {user_data['id']}: {ticket_path}")
         return {
@@ -260,24 +257,22 @@ def send_existing_ticket(self, user_id: int, telegram_id: str, ticket_path: str)
         if not os.path.exists(ticket_path):
             raise FileNotFoundError(f"Ticket not found: {ticket_path}")
         
-        # Отправляем билет
+        # Отправляем билет (async операция)
         result = asyncio.run(send_ticket_file(telegram_id, ticket_path))
         
         if result:
-            # Обновляем статус в БД
-            async def update_sent_status():
-                async with async_session() as session:
-                    await session.execute(
-                        update(Survey)
-                        .where(Survey.id == user_id)
-                        .values(
-                            ticket_sent=True,
-                            ticket_sent_at=datetime.utcnow()
-                        )
+            # Обновляем статус в БД (СИНХРОННО для Celery!)
+            with sync_session() as session:
+                session.execute(
+                    update(Survey)
+                    .where(Survey.id == user_id)
+                    .values(
+                        ticket_sent=True,
+                        ticket_sent_at=datetime.utcnow()
                     )
-                    await session.commit()
+                )
+                session.commit()
             
-            asyncio.run(update_sent_status())
             logger.info(f"✅ Ticket sent to user {telegram_id}")
             return {'status': 'success', 'user_id': user_id}
         else:

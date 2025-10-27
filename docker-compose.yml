@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # PostgreSQL с оптимизацией для высокой нагрузки
   db:
-    image: postgres:16-alpine
+    image: postgres:15
     restart: always
     environment:
       POSTGRES_USER: ${DB_USER:-user}
@@ -63,10 +63,8 @@ services:
     build: .
     restart: always
     depends_on:
-      db:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      - db
+      - redis
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - DATABASE_URL=postgresql+asyncpg://${DB_USER:-user}:${DB_PASSWORD:-pass}@db:5432/${DB_NAME:-new_bal_db}
@@ -117,6 +115,7 @@ services:
       - redis
       - celery_worker
     environment:
+      - DATABASE_URL=postgresql+asyncpg://${DB_USER:-user}:${DB_PASSWORD:-pass}@db:5432/${DB_NAME:-new_bal_db}
       - REDIS_BROKER_URL=redis://redis:6379/1
     ports:
       - "5555:5555"

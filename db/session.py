@@ -1,6 +1,7 @@
 import os
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, Session
 from dotenv import load_dotenv
 from redis.asyncio import Redis
 from aiogram.fsm.storage.redis import RedisStorage
@@ -9,7 +10,7 @@ load_dotenv()
 DATABASE_URL = os.getenv("DATABASE_URL") or "sqlite+aiosqlite:///./test.db"
 REDIS_URL = os.getenv("REDIS_URL") or "redis://localhost:6379/0"
 
-# Оптимизированный connection pool для PostgreSQL
+# Async engine для бота
 engine = create_async_engine(
     DATABASE_URL,
     echo=False,
@@ -24,6 +25,24 @@ engine = create_async_engine(
 )
 
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+# Sync engine для Celery (заменяем asyncpg на psycopg2)
+SYNC_DATABASE_URL = DATABASE_URL.replace("+asyncpg", "").replace("+aiosqlite", "")
+if SYNC_DATABASE_URL.startswith("postgresql://"):
+    # Для psycopg2
+    sync_engine = create_engine(
+        SYNC_DATABASE_URL,
+        echo=False,
+        pool_size=20,
+        max_overflow=40,
+        pool_pre_ping=True,
+        pool_recycle=3600,
+    )
+else:
+    # Для SQLite
+    sync_engine = create_engine(SYNC_DATABASE_URL, echo=False)
+
+sync_session = sessionmaker(sync_engine, class_=Session, expire_on_commit=False)
 
 # Redis для FSM storage (состояния пользователей)
 redis_client = Redis.from_url(REDIS_URL, decode_responses=True)
