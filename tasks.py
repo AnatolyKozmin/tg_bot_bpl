@@ -298,12 +298,12 @@ def broadcast_tickets_task(tickets_to_send: list):
     
     logger.info(f"📢 Starting broadcast for {len(tickets_to_send)} users")
     
-    # Создаем группу задач для отправки
+    # Создаем группу задач для отправки (позиционные аргументы!)
     job = group(
         send_existing_ticket.s(
-            user_id=ticket['user_id'],
-            telegram_id=ticket['telegram_id'],
-            ticket_path=ticket['ticket_path']
+            ticket['user_id'],
+            ticket['telegram_id'],
+            ticket['ticket_path']
         ) 
         for ticket in tickets_to_send
     )
@@ -326,10 +326,11 @@ def generate_tickets_batch(users_data: list):
     
     logger.info(f"🎫 Generating tickets for {len(users_data)} users")
     
+    # Создаем группу задач (позиционные аргументы!)
     job = group(
         generate_ticket.s(
-            user_id=user['id'],
-            user_data=user
+            user['id'],
+            user
         ) 
         for user in users_data
     )
