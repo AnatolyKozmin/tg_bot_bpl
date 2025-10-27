@@ -298,16 +298,27 @@ def broadcast_tickets_task(tickets_to_send: list):
     
     logger.info(f"📢 Starting broadcast for {len(tickets_to_send)} users")
     
+    # DEBUG: Показываем первые 3 записи
+    if tickets_to_send:
+        logger.info(f"🔍 First ticket example: {tickets_to_send[0]}")
+    
     # Создаем группу задач для отправки (позиционные аргументы!)
-    job = group(
-        send_existing_ticket.s(
+    tasks_list = []
+    for ticket in tickets_to_send:
+        task_sig = send_existing_ticket.s(
             ticket['user_id'],
             ticket['telegram_id'],
             ticket['ticket_path']
-        ) 
-        for ticket in tickets_to_send
-    )
+        )
+        tasks_list.append(task_sig)
+        logger.info(f"✅ Created task for user {ticket['user_id']} (TG: {ticket['telegram_id']})")
+    
+    logger.info(f"📋 Total tasks created: {len(tasks_list)}")
+    
+    job = group(tasks_list)
     result = job.apply_async()
+    
+    logger.info(f"🚀 Group applied, result ID: {result.id if hasattr(result, 'id') else 'N/A'}")
     
     return {
         'status': 'started',
