@@ -95,6 +95,7 @@ services:
       - DATABASE_URL=postgresql+asyncpg://${DB_USER:-user}:${DB_PASSWORD:-pass}@db:5432/${DB_NAME:-new_bal_db}
       - REDIS_BROKER_URL=redis://redis:6379/1
       - TICKET_TEMPLATE_PATH=/app/ticket_template.png
+      - PYTHONPATH=/app
     volumes:
       - .:/app
       - ./logs:/app/logs
