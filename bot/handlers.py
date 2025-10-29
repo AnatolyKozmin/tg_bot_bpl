@@ -412,7 +412,7 @@ async def group_handler(message: Message, state: FSMContext):
     """Обработка группы"""
     if message.text == "◀️ Назад":
         await handle_back(message, state)
-            return
+        return
     
     await state.update_data(group=message.text)
     
@@ -767,13 +767,13 @@ async def confirm_cb(query: CallbackQuery, state: FSMContext):
         if data.get('partner_is_student') is not None:
             data['partner_status'] = "studying" if data.get('partner_is_student') else "graduated"
         
-    allowed = {col.name for col in Survey.__table__.columns}
-    payload = {k: v for k, v in data.items() if k in allowed}
+        allowed = {col.name for col in Survey.__table__.columns}
+        payload = {k: v for k, v in data.items() if k in allowed}
         
-    async with async_session() as session:
-        survey = Survey(**payload)
-        session.add(survey)
-        await session.commit()
+        async with async_session() as session:
+            survey = Survey(**payload)
+            session.add(survey)
+            await session.commit()
         
         await query.message.edit_text(
             f"✅ **Регистрация успешна!**\n\n"
