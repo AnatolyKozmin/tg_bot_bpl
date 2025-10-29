@@ -293,7 +293,7 @@ async def consent_cb(query: CallbackQuery, state: FSMContext):
     )
 
 
-@dp.callback_query(lambda c: c.data.startswith("is_student_"))
+@dp.callback_query(lambda c: c.data.startswith("is_student_") and c.message.text.startswith("**2)"))
 async def is_student_cb(query: CallbackQuery, state: FSMContext):
     """Обработка статуса студента"""
     is_student = query.data == "is_student_yes"
@@ -347,94 +347,64 @@ async def fio_handler(message: Message, state: FSMContext):
     )
 
 
-@dp.callback_query(lambda c: c.data.startswith("faculty_"))
+@dp.callback_query(lambda c: c.data.startswith("faculty_") and not c.message.text.startswith("**11)"))
 async def faculty_cb(query: CallbackQuery, state: FSMContext):
-    """Обработка факультета"""
+    """Обработка факультета (основная регистрация)"""
     faculty = query.data.replace("faculty_", "")
     await state.update_data(faculty=faculty)
     
     # Проверяем, это редактирование или новая регистрация
     data = await state.get_data()
     
-    # Для основной регистрации (не партнера)
-    if not query.message.text.startswith("**11)"):
-        await query.message.edit_text(
+    await query.message.edit_text(
             f"**4) Выберите факультет обучения:**\n\n"
             f"✅ {faculty}",
             parse_mode="Markdown"
-        )
-        
-        if data.get('user_id'):  # Это редактирование
-            await state.set_state(SurveyStates.review)
-            await send_review(query.message, state)
-            return
-        
-        # Новая регистрация - переходим к следующему вопросу
-        await state.set_state(SurveyStates.course)
-        await query.message.answer(
-            "**5) Выберите курс обучения:**\n\n"
-            "Б - Бакалавриат, М - Магистратура",
-            reply_markup=course_kb(),
-            parse_mode="Markdown"
-        )
-    else:
-        # Это для партнера (вызывается из partner_faculty_cb)
-        await query.message.edit_text(
-            f"**11) Выберите факультет партнёра:**\n\n✅ {faculty}",
-            parse_mode="Markdown"
-        )
-        
-        await state.set_state(SurveyStates.partner_course)
-        await query.message.answer(
-            "**12) Выберите курс обучения партнёра:**",
-            reply_markup=course_kb(),
-            parse_mode="Markdown"
-        )
+    )
+    
+    if data.get('user_id'):  # Это редактирование
+        await state.set_state(SurveyStates.review)
+        await send_review(query.message, state)
+        return
+    
+    # Новая регистрация - переходим к следующему вопросу
+    await state.set_state(SurveyStates.course)
+    await query.message.answer(
+        "**5) Выберите курс обучения:**\n\n"
+        "Б - Бакалавриат, М - Магистратура",
+        reply_markup=course_kb(),
+        parse_mode="Markdown"
+    )
 
 
-@dp.callback_query(lambda c: c.data.startswith("course_"))
+@dp.callback_query(lambda c: c.data.startswith("course_") and not c.message.text.startswith("**12)"))
 async def course_cb(query: CallbackQuery, state: FSMContext):
-    """Обработка курса"""
+    """Обработка курса (основная регистрация)"""
     course = query.data.replace("course_", "")
     await state.update_data(course=course)
     
     # Проверяем, это редактирование или новая регистрация
     data = await state.get_data()
     
-    # Для основной регистрации (не партнера)
-    if not query.message.text.startswith("**12)"):
-        await query.message.edit_text(
+    await query.message.edit_text(
             f"**5) Выберите курс обучения:**\n\n"
             f"✅ {course}",
             parse_mode="Markdown"
-        )
-        
-        if data.get('user_id'):  # Это редактирование
-            await state.set_state(SurveyStates.review)
-            await send_review(query.message, state)
-            return
-        
-        # Новая регистрация
-        await state.set_state(SurveyStates.group)
-        await query.message.answer(
-            "**6) Введите группу обучения**\n\n"
-            'Пример: "ПИ23-1"',
-            reply_markup=back_reply_kb(),
-            parse_mode="Markdown"
-        )
-    else:
-        # Это для партнера
-        await query.message.edit_text(
-            f"**12) Выберите курс обучения партнёра:**\n\n✅ {course}",
-            parse_mode="Markdown"
-        )
-        
-        await state.set_state(SurveyStates.partner_group)
-        await query.message.answer(
-            "**13) Введите группу партнёра**",
-            reply_markup=back_reply_kb(),
-            parse_mode="Markdown"
-        )
+    )
+    
+    if data.get('user_id'):  # Это редактирование
+        await state.set_state(SurveyStates.review)
+        await send_review(query.message, state)
+        return
+    
+    # Новая регистрация
+    await state.set_state(SurveyStates.group)
+    await query.message.answer(
+        "**6) Введите группу обучения**\n\n"
+        'Пример: "ПИ23-1"',
+        reply_markup=back_reply_kb(),
+        parse_mode="Markdown"
+    )
 
 
 @dp.message(SurveyStates.group)
@@ -587,6 +557,42 @@ async def partner_fio_handler(message: Message, state: FSMContext):
     )
 
 
+@dp.callback_query(lambda c: c.data.startswith("faculty_") and c.message.text.startswith("**11)"))
+async def partner_faculty_cb(query: CallbackQuery, state: FSMContext):
+    """Обработка факультета партнера"""
+    faculty = query.data.replace("faculty_", "")
+    await state.update_data(partner_faculty=faculty)
+    
+    await query.message.edit_text(
+        f"**11) Выберите факультет партнёра:**\n\n✅ {faculty}",
+        parse_mode="Markdown"
+    )
+    
+    await state.set_state(SurveyStates.partner_course)
+    await query.message.answer(
+        "**12) Выберите курс обучения партнёра:**",
+        reply_markup=course_kb(),
+        parse_mode="Markdown"
+    )
+
+
+@dp.callback_query(lambda c: c.data.startswith("course_") and c.message.text.startswith("**12)"))
+async def partner_course_cb(query: CallbackQuery, state: FSMContext):
+    """Обработка курса партнера"""
+    course = query.data.replace("course_", "")
+    await state.update_data(partner_course=course)
+    
+    await query.message.edit_text(
+        f"**12) Выберите курс обучения партнёра:**\n\n✅ {course}",
+        parse_mode="Markdown"
+    )
+    
+    await state.set_state(SurveyStates.partner_group)
+    await query.message.answer(
+        "**13) Введите группу партнёра**",
+        reply_markup=back_reply_kb(),
+        parse_mode="Markdown"
+    )
 
 
 
