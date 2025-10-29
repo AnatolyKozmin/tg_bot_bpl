@@ -156,8 +156,8 @@ def generate_ticket(self, user_id: int, user_data: dict):
         
         # 5. Размещаем текст с ИДЕАЛЬНЫМ центрированием
         
-        # Telegram ID (под QR-кодом)
-        tg_id_text = f"ID: {user_data['telegram_id']}"
+        # Telegram ID (под QR-кодом) - только цифры
+        tg_id_text = user_data['telegram_id']
         
         # Вычисляем размер текста telegram_id
         try:

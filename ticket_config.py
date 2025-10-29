@@ -12,17 +12,17 @@ import os
 # Путь к шрифту (автоопределение: Docker или локально)
 if os.path.exists("/app"):
     # На сервере в Docker
-    FONT_PATH = "/app/denistina_en.ttf"
-    FONT_PATH_FALLBACK = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+    FONT_PATH = "/app/Futuralightc.otf"
+    FONT_PATH_FALLBACK = "/usr/share/fonts/truetype/dejavu/Futuralightc.otf"
 else:
     # На локальной машине
-    FONT_PATH = "denistina_en.ttf"
-    FONT_PATH_FALLBACK = "DejaVuSans-Bold.ttf"
+    FONT_PATH = "Futuralightc.otf"
+    FONT_PATH_FALLBACK = "Futuralightc.otf"
 
 # Размеры шрифтов (в пикселях)
 FONT_SIZES = {
-    'name': 500,         # Фамилия и Имя
-    'telegram_id': 500,  # Telegram ID
+    'name': 100,         # Фамилия и Имя
+    'telegram_id': 80,  # Telegram ID
 }
 
 # =============================================================================
@@ -31,9 +31,9 @@ FONT_SIZES = {
 # =============================================================================
 
 TEXT_POSITIONS = {
-    'qr_code': (750, 1080),          # Центр QR-кода
-    'telegram_id': (750, 1300),      # Telegram ID (под QR)
-    'name': (750, 1540),             # Фамилия Имя (под telegram_id)
+    'qr_code': (750, 1125),          # Центр QR-кода
+    'telegram_id': (750, 1650),      # Telegram ID (под QR)
+    'name': (750, 1800),             # Фамилия Имя (под telegram_id)
 }
 
 # =============================================================================
@@ -42,7 +42,7 @@ TEXT_POSITIONS = {
 
 TEXT_COLORS = {
     'name': 'white',            # Цвет имени
-    'telegram_id': '#555555',   # Цвет telegram_id (серый)
+    'telegram_id': 'white',   # Цвет telegram_id
 }
 
 # =============================================================================
@@ -50,7 +50,7 @@ TEXT_COLORS = {
 # =============================================================================
 
 QR_CONFIG = {
-    'size': (400, 400),         # Размер QR-кода (ширина, высота)
+    'size': (550, 550),         # Размер QR-кода (ширина, высота)
     'box_size': 10,             # Размер одного "пикселя" QR (минимум 1)
     'border': 2,                # Толщина белой рамки вокруг QR
 }
