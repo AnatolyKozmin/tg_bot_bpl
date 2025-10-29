@@ -320,16 +320,16 @@ async def fio_handler(message: Message, state: FSMContext):
     if message.text == "◀️ Назад":
         await handle_back(message, state)
         return
-
+    
     # Валидация
-        if any(ch.isdigit() for ch in message.text):
+    if any(ch.isdigit() for ch in message.text):
         await message.answer(
             "❌ ФИО не должно содержать цифр. Попробуйте ещё раз.",
             reply_markup=back_reply_kb()
         )
-            return
+        return
     
-        await state.update_data(fio=message.text)
+    await state.update_data(fio=message.text)
     
     # Проверяем, это редактирование или новая регистрация
     data = await state.get_data()
