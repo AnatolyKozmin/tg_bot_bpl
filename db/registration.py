@@ -105,7 +105,7 @@ async def try_register(ticket_type: str) -> tuple[bool, str]:
                 f"Осталось: {remaining}"
             )
             
-            return True, f"✅ Успешно! Зарегистрировано мест: {places_needed}. Осталось мест: {remaining}"
+            return True, f"✅ Успешно! Зарегистрировано мест: {places_needed}."
 
 
 async def get_registration_stats() -> dict:

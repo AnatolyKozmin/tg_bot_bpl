@@ -25,8 +25,8 @@ def create_ticket_template():
     
     # Пытаемся загрузить шрифт
     try:
-        title_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 60)
-        label_font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 30)
+        title_font = ImageFont.truetype("Futuralightc (2).otf", 60)
+        label_font = ImageFont.truetype("denistina_en (2).ttf", 30)
     except:
         try:
             title_font = ImageFont.truetype("arial.ttf", 60)

@@ -7,6 +7,7 @@ __pycache__/
 *.so
 
 # Distribution / packaging
+venv
 .Python
 build/
 develop-eggs/
@@ -127,7 +128,7 @@ backup_*.sql
 
 # Tickets (НЕ коммитим билеты!)
 tickets/
-ticket_template.png
+
 
 # Alembic
 alembic/__pycache__/

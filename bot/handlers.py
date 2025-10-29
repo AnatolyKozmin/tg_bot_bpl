@@ -330,8 +330,16 @@ async def fio_handler(message: Message, state: FSMContext):
         return
     
     await state.update_data(fio=message.text)
-    await state.set_state(SurveyStates.faculty)
     
+    # Проверяем, это редактирование или новая регистрация
+    data = await state.get_data()
+    if data.get('user_id'):  # Это редактирование
+        await state.set_state(SurveyStates.review)
+        await send_review(message, state)
+        return
+    
+    # Новая регистрация - переходим к следующему вопросу
+    await state.set_state(SurveyStates.faculty)
     await message.answer(
         "**4) Выберите факультет обучения:**",
         reply_markup=faculty_kb(),
@@ -345,19 +353,43 @@ async def faculty_cb(query: CallbackQuery, state: FSMContext):
     faculty = query.data.replace("faculty_", "")
     await state.update_data(faculty=faculty)
     
-    await query.message.edit_text(
-        f"**4) Выберите факультет обучения:**\n\n"
-        f"✅ {faculty}",
-        parse_mode="Markdown"
-    )
+    # Проверяем, это редактирование или новая регистрация
+    data = await state.get_data()
     
-    await state.set_state(SurveyStates.course)
-    await query.message.answer(
-        "**5) Выберите курс обучения:**\n\n"
-        "Б - Бакалавриат, М - Магистратура",
-        reply_markup=course_kb(),
-        parse_mode="Markdown"
-    )
+    # Для основной регистрации (не партнера)
+    if not query.message.text.startswith("**11)"):
+        await query.message.edit_text(
+            f"**4) Выберите факультет обучения:**\n\n"
+            f"✅ {faculty}",
+            parse_mode="Markdown"
+        )
+        
+        if data.get('user_id'):  # Это редактирование
+            await state.set_state(SurveyStates.review)
+            await send_review(query.message, state)
+            return
+        
+        # Новая регистрация - переходим к следующему вопросу
+        await state.set_state(SurveyStates.course)
+        await query.message.answer(
+            "**5) Выберите курс обучения:**\n\n"
+            "Б - Бакалавриат, М - Магистратура",
+            reply_markup=course_kb(),
+            parse_mode="Markdown"
+        )
+    else:
+        # Это для партнера (вызывается из partner_faculty_cb)
+        await query.message.edit_text(
+            f"**11) Выберите факультет партнёра:**\n\n✅ {faculty}",
+            parse_mode="Markdown"
+        )
+        
+        await state.set_state(SurveyStates.partner_course)
+        await query.message.answer(
+            "**12) Выберите курс обучения партнёра:**",
+            reply_markup=course_kb(),
+            parse_mode="Markdown"
+        )
 
 
 @dp.callback_query(lambda c: c.data.startswith("course_"))
@@ -366,19 +398,43 @@ async def course_cb(query: CallbackQuery, state: FSMContext):
     course = query.data.replace("course_", "")
     await state.update_data(course=course)
     
-    await query.message.edit_text(
-        f"**5) Выберите курс обучения:**\n\n"
-        f"✅ {course}",
-        parse_mode="Markdown"
-    )
+    # Проверяем, это редактирование или новая регистрация
+    data = await state.get_data()
     
-    await state.set_state(SurveyStates.group)
-    await query.message.answer(
-        "**6) Введите группу обучения**\n\n"
-        'Пример: "ПИ23-1"',
-        reply_markup=back_reply_kb(),
-        parse_mode="Markdown"
-    )
+    # Для основной регистрации (не партнера)
+    if not query.message.text.startswith("**12)"):
+        await query.message.edit_text(
+            f"**5) Выберите курс обучения:**\n\n"
+            f"✅ {course}",
+            parse_mode="Markdown"
+        )
+        
+        if data.get('user_id'):  # Это редактирование
+            await state.set_state(SurveyStates.review)
+            await send_review(query.message, state)
+            return
+        
+        # Новая регистрация
+        await state.set_state(SurveyStates.group)
+        await query.message.answer(
+            "**6) Введите группу обучения**\n\n"
+            'Пример: "ПИ23-1"',
+            reply_markup=back_reply_kb(),
+            parse_mode="Markdown"
+        )
+    else:
+        # Это для партнера
+        await query.message.edit_text(
+            f"**12) Выберите курс обучения партнёра:**\n\n✅ {course}",
+            parse_mode="Markdown"
+        )
+        
+        await state.set_state(SurveyStates.partner_group)
+        await query.message.answer(
+            "**13) Введите группу партнёра**",
+            reply_markup=back_reply_kb(),
+            parse_mode="Markdown"
+        )
 
 
 @dp.message(SurveyStates.group)
@@ -389,9 +445,16 @@ async def group_handler(message: Message, state: FSMContext):
         return
     
     await state.update_data(group=message.text)
-    await state.set_state(SurveyStates.student_id_or_diploma)
     
+    # Проверяем, это редактирование или новая регистрация
     data = await state.get_data()
+    if data.get('user_id'):  # Это редактирование
+        await state.set_state(SurveyStates.review)
+        await send_review(message, state)
+        return
+    
+    # Новая регистрация - переходим к следующему вопросу
+    await state.set_state(SurveyStates.student_id_or_diploma)
     is_student = data.get('is_student', True)
     
     if is_student:
@@ -524,42 +587,8 @@ async def partner_fio_handler(message: Message, state: FSMContext):
     )
 
 
-@dp.callback_query(lambda c: c.data.startswith("faculty_") and c.message.text.startswith("**11)"))
-async def partner_faculty_cb(query: CallbackQuery, state: FSMContext):
-    """Обработка факультета партнера"""
-    faculty = query.data.replace("faculty_", "")
-    await state.update_data(partner_faculty=faculty)
-    
-    await query.message.edit_text(
-        f"**11) Выберите факультет партнёра:**\n\n✅ {faculty}",
-        parse_mode="Markdown"
-    )
-    
-    await state.set_state(SurveyStates.partner_course)
-    await query.message.answer(
-        "**12) Выберите курс обучения партнёра:**",
-        reply_markup=course_kb(),
-        parse_mode="Markdown"
-    )
 
 
-@dp.callback_query(lambda c: c.data.startswith("course_") and c.message.text.startswith("**12)"))
-async def partner_course_cb(query: CallbackQuery, state: FSMContext):
-    """Обработка курса партнера"""
-    course = query.data.replace("course_", "")
-    await state.update_data(partner_course=course)
-    
-    await query.message.edit_text(
-        f"**12) Выберите курс обучения партнёра:**\n\n✅ {course}",
-        parse_mode="Markdown"
-    )
-    
-    await state.set_state(SurveyStates.partner_group)
-    await query.message.answer(
-        "**13) Введите группу партнёра**",
-        reply_markup=back_reply_kb(),
-        parse_mode="Markdown"
-    )
 
 
 @dp.message(SurveyStates.partner_group)
@@ -675,7 +704,39 @@ async def confirm_cb(query: CallbackQuery, state: FSMContext):
     """Подтверждение и сохранение регистрации"""
     data = await state.get_data()
     ticket_type = data.get('pair_or_single', 'single')
+    user_id = data.get('user_id')  # Если редактируем существующую анкету
     
+    # Если это редактирование существующей анкеты
+    if user_id:
+        try:
+            allowed = {col.name for col in Survey.__table__.columns}
+            payload = {k: v for k, v in data.items() if k in allowed and k != 'user_id'}
+            
+            async with async_session() as session:
+                await session.execute(
+                    update(Survey)
+                    .where(Survey.id == user_id)
+                    .values(**payload)
+                )
+                await session.commit()
+            
+            await query.message.edit_text(
+                "✅ **Анкета обновлена!**\n\n"
+                "Ваши изменения сохранены.\n"
+                "Используйте /start для управления билетом.",
+                parse_mode="Markdown"
+            )
+            
+            logger.info(f"✅ Survey updated: user_id={query.from_user.id}")
+            
+        except Exception as e:
+            logger.error(f"❌ Update error: {e}")
+            await query.message.edit_text("❌ Ошибка при сохранении. Обратитесь к администратору.")
+        
+        await state.clear()
+        return
+    
+    # Новая регистрация
     # Атомарная проверка мест
     success, message = await try_register(ticket_type)
     
@@ -700,7 +761,6 @@ async def confirm_cb(query: CallbackQuery, state: FSMContext):
         
         await query.message.edit_text(
             f"✅ **Регистрация успешна!**\n\n"
-            f"{message}\n\n"
             f"🎫 Билет будет отправлен вам позже.\n"
             f"Используйте /start чтобы управлять билетом.",
             parse_mode="Markdown"
@@ -744,6 +804,7 @@ async def edit_ticket_cb(query: CallbackQuery, state: FSMContext):
     
     # Загружаем данные в состояние
     await state.update_data(
+        user_id=survey.id,  # Сохраняем ID для обновления
         telegram_id=telegram_id,
         telegram_username=query.from_user.username,
         consent=survey.consent,
@@ -755,7 +816,7 @@ async def edit_ticket_cb(query: CallbackQuery, state: FSMContext):
         student_id=survey.student_id,
         diploma_number=survey.diploma_number,
         pair_or_single=survey.pair_or_single,
-        partner_is_student=survey.partner_status == 'studying' if survey.partner_status else None,
+        partner_is_student=survey.partner_is_student,  # Исправлено!
         partner_fio=survey.partner_fio,
         partner_faculty=survey.partner_faculty,
         partner_course=survey.partner_course,
@@ -827,7 +888,7 @@ async def keep_ticket_cb(query: CallbackQuery, state: FSMContext):
 
 # ==================== EDIT HANDLERS ====================
 
-@dp.callback_query(lambda c: c.data.startswith('edit_'))
+@dp.callback_query(lambda c: c.data.startswith('edit_') and c.data != 'edit_ticket')
 async def edit_field_cb(query: CallbackQuery, state: FSMContext):
     """Редактирование конкретного поля"""
     field = query.data.replace('edit_', '')
@@ -835,7 +896,7 @@ async def edit_field_cb(query: CallbackQuery, state: FSMContext):
     if field == 'fio':
         await state.set_state(SurveyStates.fio)
         await query.message.answer(
-            "**Введите новое ФИО:**",
+            "**Введите новое ФИО:**\n\nПосле ввода вы вернетесь к просмотру анкеты.",
             reply_markup=back_reply_kb(),
             parse_mode="Markdown"
         )
@@ -856,7 +917,7 @@ async def edit_field_cb(query: CallbackQuery, state: FSMContext):
     elif field == 'group':
         await state.set_state(SurveyStates.group)
         await query.message.answer(
-            "**Введите новую группу:**",
+            "**Введите новую группу:**\n\nПосле ввода вы вернетесь к просмотру анкеты.",
             reply_markup=back_reply_kb(),
             parse_mode="Markdown"
         )
