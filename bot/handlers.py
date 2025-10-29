@@ -256,7 +256,7 @@ async def cmd_start(message: Message, state: FSMContext):
             reply_markup=manage_ticket_kb()
         )
         return
-    
+
     # Начинаем новую регистрацию
     await state.clear()
     await state.update_data(
@@ -293,7 +293,7 @@ async def consent_cb(query: CallbackQuery, state: FSMContext):
     )
 
 
-@dp.callback_query(lambda c: c.data.startswith("is_student_") and c.message.text.startswith("**2)"))
+@dp.callback_query(lambda c: c.data.startswith("is_student_") and "являетесь студентом или выпускником" in c.message.text.lower())
 async def is_student_cb(query: CallbackQuery, state: FSMContext):
     """Обработка статуса студента"""
     is_student = query.data == "is_student_yes"
@@ -320,16 +320,16 @@ async def fio_handler(message: Message, state: FSMContext):
     if message.text == "◀️ Назад":
         await handle_back(message, state)
         return
-    
+
     # Валидация
-    if any(ch.isdigit() for ch in message.text):
+        if any(ch.isdigit() for ch in message.text):
         await message.answer(
             "❌ ФИО не должно содержать цифр. Попробуйте ещё раз.",
             reply_markup=back_reply_kb()
         )
-        return
+            return
     
-    await state.update_data(fio=message.text)
+        await state.update_data(fio=message.text)
     
     # Проверяем, это редактирование или новая регистрация
     data = await state.get_data()
@@ -347,7 +347,7 @@ async def fio_handler(message: Message, state: FSMContext):
     )
 
 
-@dp.callback_query(lambda c: c.data.startswith("faculty_") and not c.message.text.startswith("**11)"))
+@dp.callback_query(lambda c: c.data.startswith("faculty_") and "факультет партнёра" not in c.message.text.lower())
 async def faculty_cb(query: CallbackQuery, state: FSMContext):
     """Обработка факультета (основная регистрация)"""
     faculty = query.data.replace("faculty_", "")
@@ -377,7 +377,7 @@ async def faculty_cb(query: CallbackQuery, state: FSMContext):
     )
 
 
-@dp.callback_query(lambda c: c.data.startswith("course_") and not c.message.text.startswith("**12)"))
+@dp.callback_query(lambda c: c.data.startswith("course_") and "курс обучения партнёра" not in c.message.text.lower())
 async def course_cb(query: CallbackQuery, state: FSMContext):
     """Обработка курса (основная регистрация)"""
     course = query.data.replace("course_", "")
@@ -412,7 +412,7 @@ async def group_handler(message: Message, state: FSMContext):
     """Обработка группы"""
     if message.text == "◀️ Назад":
         await handle_back(message, state)
-        return
+            return
     
     await state.update_data(group=message.text)
     
@@ -513,11 +513,13 @@ async def pair_cb(query: CallbackQuery, state: FSMContext):
 
 # ==================== PARTNER FLOW ====================
 
-@dp.callback_query(lambda c: c.data.startswith("is_student_") and c.message.text.startswith("**9)"))
+@dp.callback_query(lambda c: c.data.startswith("is_student_") and "партнёр является студентом или выпускником" in c.message.text.lower())
 async def partner_is_student_cb(query: CallbackQuery, state: FSMContext):
     """Обработка статуса партнера (студент/выпускник)"""
     is_student = query.data == "is_student_yes"
     await state.update_data(partner_is_student=is_student)
+    partner_status = "studying" if is_student else "graduated"
+    await state.update_data(partner_status=partner_status)
     
     status_text = "👨‍🎓 **Студент**" if is_student else "🎓 **Выпускник**"
     await query.message.edit_text(
@@ -557,7 +559,7 @@ async def partner_fio_handler(message: Message, state: FSMContext):
     )
 
 
-@dp.callback_query(lambda c: c.data.startswith("faculty_") and c.message.text.startswith("**11)"))
+@dp.callback_query(lambda c: c.data.startswith("faculty_") and "факультет партнёра" in c.message.text.lower())
 async def partner_faculty_cb(query: CallbackQuery, state: FSMContext):
     """Обработка факультета партнера"""
     faculty = query.data.replace("faculty_", "")
@@ -576,7 +578,7 @@ async def partner_faculty_cb(query: CallbackQuery, state: FSMContext):
     )
 
 
-@dp.callback_query(lambda c: c.data.startswith("course_") and c.message.text.startswith("**12)"))
+@dp.callback_query(lambda c: c.data.startswith("course_") and "курс обучения партнёра" in c.message.text.lower())
 async def partner_course_cb(query: CallbackQuery, state: FSMContext):
     """Обработка курса партнера"""
     course = query.data.replace("course_", "")
@@ -715,6 +717,10 @@ async def confirm_cb(query: CallbackQuery, state: FSMContext):
     # Если это редактирование существующей анкеты
     if user_id:
         try:
+            # Конвертируем partner_is_student обратно в partner_status для БД
+            if data.get('partner_is_student') is not None:
+                data['partner_status'] = "studying" if data.get('partner_is_student') else "graduated"
+            
             allowed = {col.name for col in Survey.__table__.columns}
             payload = {k: v for k, v in data.items() if k in allowed and k != 'user_id'}
             
@@ -757,13 +763,17 @@ async def confirm_cb(query: CallbackQuery, state: FSMContext):
     
     # Сохраняем в БД
     try:
-        allowed = {col.name for col in Survey.__table__.columns}
-        payload = {k: v for k, v in data.items() if k in allowed}
+        # Конвертируем partner_is_student в partner_status для БД
+        if data.get('partner_is_student') is not None:
+            data['partner_status'] = "studying" if data.get('partner_is_student') else "graduated"
         
-        async with async_session() as session:
-            survey = Survey(**payload)
-            session.add(survey)
-            await session.commit()
+    allowed = {col.name for col in Survey.__table__.columns}
+    payload = {k: v for k, v in data.items() if k in allowed}
+        
+    async with async_session() as session:
+        survey = Survey(**payload)
+        session.add(survey)
+        await session.commit()
         
         await query.message.edit_text(
             f"✅ **Регистрация успешна!**\n\n"
@@ -809,6 +819,11 @@ async def edit_ticket_cb(query: CallbackQuery, state: FSMContext):
         return
     
     # Загружаем данные в состояние
+    # Конвертируем partner_status в partner_is_student для совместимости
+    partner_is_student = None
+    if survey.partner_status:
+        partner_is_student = survey.partner_status == "studying"
+    
     await state.update_data(
         user_id=survey.id,  # Сохраняем ID для обновления
         telegram_id=telegram_id,
@@ -822,7 +837,8 @@ async def edit_ticket_cb(query: CallbackQuery, state: FSMContext):
         student_id=survey.student_id,
         diploma_number=survey.diploma_number,
         pair_or_single=survey.pair_or_single,
-        partner_is_student=survey.partner_is_student,  # Исправлено!
+        partner_is_student=partner_is_student,
+        partner_status=survey.partner_status,
         partner_fio=survey.partner_fio,
         partner_faculty=survey.partner_faculty,
         partner_course=survey.partner_course,
@@ -898,7 +914,7 @@ async def keep_ticket_cb(query: CallbackQuery, state: FSMContext):
 async def edit_field_cb(query: CallbackQuery, state: FSMContext):
     """Редактирование конкретного поля"""
     field = query.data.replace('edit_', '')
-    
+
     if field == 'fio':
         await state.set_state(SurveyStates.fio)
         await query.message.answer(
