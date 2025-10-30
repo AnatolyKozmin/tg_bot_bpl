@@ -81,11 +81,11 @@ services:
       - ./tickets:/app/tickets
     command: ["python", "main.py"]
     deploy:
-      replicas: 3  # 3 инстанса для обработки 200-500 юзеров/сек
+      replicas: 1  # Long polling режим - ТОЛЬКО 1 инстанс!
       resources:
         limits:
-          cpus: '1'
-          memory: 512M
+          cpus: '2'  # Увеличили CPU для компенсации
+          memory: 1G
 
   # Celery Worker для рассылки билетов
   celery_worker:
