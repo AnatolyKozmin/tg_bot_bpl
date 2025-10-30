@@ -40,6 +40,7 @@ celery_app.conf.update(
     worker_prefetch_multiplier=1,     # Берем по одной задаче
     task_time_limit=300,              # Таймаут задачи 5 минут
     task_soft_time_limit=240,         # Мягкий таймаут 4 минуты
+    broker_connection_retry_on_startup=True,  # Убирает warning Celery 6.0
 )
 
 logger = logging.getLogger(__name__)
