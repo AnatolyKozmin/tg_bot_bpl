@@ -16,22 +16,26 @@ services:
     command: >
       postgres
       -c max_connections=500
-      -c shared_buffers=256MB
-      -c effective_cache_size=1GB
-      -c maintenance_work_mem=64MB
+      -c shared_buffers=512MB
+      -c effective_cache_size=2GB
+      -c maintenance_work_mem=128MB
       -c checkpoint_completion_target=0.9
       -c wal_buffers=16MB
       -c default_statistics_target=100
       -c random_page_cost=1.1
       -c effective_io_concurrency=200
-      -c work_mem=4MB
+      -c work_mem=8MB
       -c min_wal_size=1GB
       -c max_wal_size=4GB
+      -c synchronous_commit=off
+      -c wal_writer_delay=200ms
+      -c commit_delay=100
+      -c commit_siblings=5
     deploy:
       resources:
         limits:
-          cpus: '2'
-          memory: 2G
+          cpus: '3'
+          memory: 3G
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-user}"]
       interval: 10s
@@ -77,7 +81,7 @@ services:
       - ./tickets:/app/tickets
     command: ["python", "main.py"]
     deploy:
-      replicas: 1  # Увеличьте до 3-5 при необходимости
+      replicas: 3  # 3 инстанса для обработки 200-500 юзеров/сек
       resources:
         limits:
           cpus: '1'
@@ -100,9 +104,9 @@ services:
       - .:/app
       - ./logs:/app/logs
       - ./tickets:/app/tickets
-    command: ["celery", "-A", "tasks", "worker", "--loglevel=info", "--concurrency=5"]
+    command: ["celery", "-A", "tasks", "worker", "--loglevel=info", "--concurrency=10"]
     deploy:
-      replicas: 1  # Можно увеличить до 2-3
+      replicas: 2  # 2 воркера по 10 потоков = 20 параллельных генераций
       resources:
         limits:
           cpus: '2'
