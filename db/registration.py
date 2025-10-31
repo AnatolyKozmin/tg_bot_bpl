@@ -72,16 +72,15 @@ async def try_register(ticket_type: str) -> tuple[bool, str]:
             
             # Проверка: открыта ли регистрация
             if not config.is_open:
-                remaining = config.max_capacity - config.current_count
-                return False, f"❌ Регистрация закрыта. Все {config.max_capacity} мест заняты."
+                return False, "❌ Регистрация закрыта. Все места заняты."
             
             # Проверка: достаточно ли мест
             if config.current_count + places_needed > config.max_capacity:
                 remaining = config.max_capacity - config.current_count
                 if remaining > 0:
-                    msg = f"❌ Недостаточно мест. Осталось {remaining} мест, а вы запрашиваете {places_needed}."
+                    msg = f"❌ Недостаточно мест. Осталось {remaining} мест, а ты запрашиваешь {places_needed}."
                 else:
-                    msg = f"❌ Все {config.max_capacity} мест заняты!"
+                    msg = "❌ Все места заняты!"
                 
                 # Автоматически закрываем регистрацию
                 config.is_open = False

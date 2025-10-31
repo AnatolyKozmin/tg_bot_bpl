@@ -293,9 +293,10 @@ async def consent_cb(query: CallbackQuery, state: FSMContext):
     )
 
 
-@dp.callback_query(lambda c: c.data.startswith("is_student_") and "являетесь студентом или выпускником" in c.message.text.lower())
+@dp.callback_query(lambda c: c.data.startswith("is_student_") and "являешься студентом или выпускником" in c.message.text.lower())
 async def is_student_cb(query: CallbackQuery, state: FSMContext):
     """Обработка статуса студента"""
+    await query.answer()
     is_student = query.data == "is_student_yes"
     await state.update_data(is_student=is_student)
     
@@ -534,6 +535,7 @@ async def pair_cb(query: CallbackQuery, state: FSMContext):
 @dp.callback_query(lambda c: c.data.startswith("is_student_") and "партнёр является студентом или выпускником" in c.message.text.lower())
 async def partner_is_student_cb(query: CallbackQuery, state: FSMContext):
     """Обработка статуса партнера (студент/выпускник)"""
+    await query.answer()
     is_student = query.data == "is_student_yes"
     await state.update_data(partner_is_student=is_student)
     partner_status = "studying" if is_student else "graduated"
