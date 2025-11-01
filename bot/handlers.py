@@ -16,6 +16,7 @@
 import os
 import asyncio
 import time
+import random
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -352,6 +353,106 @@ async def cmd_broadcast(message: Message):
         
     except Exception as e:
         logger.error(f"❌ Broadcast error: {e}")
+
+
+@dp.message(Command("test_rass"))
+async def cmd_test_rass(message: Message):
+    """Тестовая рассылка: отправляет 10 случайных билетов в текущий чат"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ У тебя нет доступа к этой команде.")
+        return
+    
+    await message.answer("🧪 Готовлю тестовую рассылку из 10 случайных билетов...")
+    
+    try:
+        async with async_session() as session:
+            # Получаем пользователей с готовыми билетами
+            result = await session.execute(
+                select(Survey).where(
+                    (Survey.ticket_cancelled == False) &
+                    (Survey.ticket_generated == True) &
+                    (Survey.ticket_path.isnot(None))
+                )
+            )
+            users = result.scalars().all()
+        
+        if not users:
+            await message.answer("❌ Нет готовых билетов для теста. Сначала сгенерируй билеты: /generate_tickets")
+            return
+        
+        # Выбираем случайные 10 билетов
+        test_count = min(10, len(users))
+        selected_users = random.sample(users, test_count)
+        
+        await message.answer(
+            f"📤 Отправляю {test_count} случайных билетов в этот чат...\n\n"
+            f"⏱ Подожди несколько секунд"
+        )
+        
+        # Отправляем билеты в текущий чат
+        chat_id = message.chat.id
+        success_count = 0
+        error_count = 0
+        errors = []
+        
+        from aiogram.types import BufferedInputFile
+        
+        for user in selected_users:
+            try:
+                ticket_path = user.ticket_path or f"tickets/ticket_{user.telegram_id}.png"
+                
+                if not os.path.exists(ticket_path):
+                    error_count += 1
+                    errors.append(f"ID {user.id}: файл не найден")
+                    continue
+                
+                # Читаем файл и отправляем
+                with open(ticket_path, 'rb') as photo_file:
+                    input_file = BufferedInputFile(
+                        file=photo_file.read(),
+                        filename="ticket.png"
+                    )
+                    
+                    fio = user.fio or "Без ФИО"
+                    caption = f"🧪 **Тестовый билет**\n\n👤 {fio}\n🆔 TG ID: `{user.telegram_id}`"
+                    
+                    await bot.send_photo(
+                        chat_id=chat_id,
+                        photo=input_file,
+                        caption=caption,
+                        parse_mode="Markdown"
+                    )
+                    
+                    success_count += 1
+                    # Небольшая задержка между отправками
+                    await asyncio.sleep(0.2)
+                    
+            except Exception as e:
+                error_count += 1
+                error_msg = f"ID {user.id} ({user.telegram_id}): {str(e)}"
+                errors.append(error_msg)
+                logger.error(f"Ошибка при отправке тестового билета {user.id}: {e}")
+        
+        # Итоговая статистика
+        result_message = (
+            f"✅ **Тестовая рассылка завершена!**\n\n"
+            f"📊 **Статистика:**\n"
+            f"• ✅ Успешно отправлено: {success_count}\n"
+            f"• ❌ Ошибок: {error_count}\n"
+        )
+        
+        if error_count > 0 and errors:
+            result_message += f"\n❌ **Ошибки:**\n"
+            for error in errors[:5]:  # Показываем первые 5 ошибок
+                result_message += f"• {error}\n"
+            if len(errors) > 5:
+                result_message += f"\n... и еще {len(errors) - 5} ошибок"
+        
+        await message.answer(result_message, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"❌ Test rass error: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {str(e)}")
 
 
 @dp.message(Command("create_google_shit"))
