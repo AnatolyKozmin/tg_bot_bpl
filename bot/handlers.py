@@ -104,6 +104,87 @@ async def cmd_stats(message: Message):
     await message.answer(text, parse_mode="Markdown")
 
 
+@dp.message(Command("tickets_status"))
+async def cmd_tickets_status(message: Message):
+    """Статус билетов: проверка рассылки и генерации"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ У тебя нет доступа к этой команде.")
+        return
+    
+    try:
+        async with async_session() as session:
+            # Получаем всех пользователей (кроме отмененных)
+            total_result = await session.execute(
+                select(Survey).where(Survey.ticket_cancelled == False)
+            )
+            all_users = total_result.scalars().all()
+            total_count = len(all_users)
+            
+            # Подсчитываем статистику
+            generated_count = sum(1 for u in all_users if u.ticket_generated)
+            sent_count = sum(1 for u in all_users if u.ticket_sent)
+            not_generated_count = total_count - generated_count
+            ready_to_send = sum(1 for u in all_users if u.ticket_generated and not u.ticket_sent and u.ticket_path)
+            failed_send = sum(1 for u in all_users if u.ticket_generated and not u.ticket_sent and not u.ticket_cancelled)
+            
+            # Получаем примеры проблемных записей
+            not_sent_with_ticket = [
+                u for u in all_users 
+                if u.ticket_generated and not u.ticket_sent and u.ticket_path and not u.ticket_cancelled
+            ][:5]
+            
+            not_sent_without_ticket = [
+                u for u in all_users
+                if u.ticket_generated and not u.ticket_sent and not u.ticket_path and not u.ticket_cancelled
+            ][:5]
+        
+        # Формируем сообщение
+        status_message = (
+            f"📊 **СТАТУС БИЛЕТОВ**\n\n"
+            f"👥 **Всего пользователей:** {total_count}\n\n"
+            f"🎫 **Генерация:**\n"
+            f"• ✅ Сгенерировано: {generated_count}\n"
+            f"• ⚠️ Не сгенерировано: {not_generated_count}\n"
+            f"• 📈 Прогресс: {(generated_count / total_count * 100) if total_count > 0 else 0:.1f}%\n\n"
+            f"📤 **Рассылка:**\n"
+            f"• ✅ Отправлено: {sent_count}\n"
+            f"• 📋 Готово к отправке: {ready_to_send}\n"
+            f"• ❌ Не отправлено (ошибки): {failed_send - ready_to_send}\n"
+            f"• 📈 Прогресс: {(sent_count / total_count * 100) if total_count > 0 else 0:.1f}%\n\n"
+        )
+        
+        # Общий статус
+        if sent_count == total_count:
+            status_message += f"✅ **Все билеты разосланы!**\n"
+        elif ready_to_send > 0:
+            status_message += f"⚠️ **Осталось разослать:** {ready_to_send} билетов\n"
+            status_message += f"💡 Используй `/rass` для продолжения рассылки\n"
+        elif not_generated_count > 0:
+            status_message += f"⚠️ **Не все билеты сгенерированы:** {not_generated_count}\n"
+            status_message += f"💡 Используй `/generate_tickets` для генерации\n"
+        
+        # Показываем примеры проблемных записей
+        if not_sent_with_ticket:
+            status_message += f"\n📋 **Готовы к отправке (примеры):**\n"
+            for user in not_sent_with_ticket[:5]:
+                fio = user.fio or "Без ФИО"
+                tg_id = user.telegram_id or "Без ID"
+                status_message += f"• ID {user.id}: {fio} (TG: {tg_id})\n"
+        
+        if not_sent_without_ticket:
+            status_message += f"\n⚠️ **Проблемные записи (без файла, примеры):**\n"
+            for user in not_sent_without_ticket[:5]:
+                fio = user.fio or "Без ФИО"
+                tg_id = user.telegram_id or "Без ID"
+                status_message += f"• ID {user.id}: {fio} (TG: {tg_id})\n"
+        
+        await message.answer(status_message, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при получении статуса билетов: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
 async def monitor_ticket_generation(message: Message, user_ids: list, total_count: int):
     """
     Мониторинг прогресса генерации билетов через проверку БД
