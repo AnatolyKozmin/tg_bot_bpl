@@ -40,4 +40,10 @@ qrcode[pil]==8.0
 prometheus-client==0.21.0
 
 # Тестирование (опционально, для load_test.py)
-faker==20.1.0                                                                                                   
+faker==20.1.0
+
+# Google Sheets API
+gspread==6.1.4
+google-auth==2.34.0
+google-auth-oauthlib==1.2.1
+google-auth-httplib2==0.2.0                                                                                                   

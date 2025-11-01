@@ -14,6 +14,8 @@
 """
 
 import os
+import asyncio
+import time
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -31,6 +33,7 @@ from bot.keyboards import (
     manage_ticket_kb, confirm_cancel_kb
 )
 from bot.middleware import RateLimitMiddleware, AntiFloodMiddleware
+from bot.google_sheets import export_to_google_sheets
 import logging
 
 logging.basicConfig(
@@ -100,9 +103,119 @@ async def cmd_stats(message: Message):
     await message.answer(text, parse_mode="Markdown")
 
 
+async def monitor_ticket_generation(message: Message, user_ids: list, total_count: int):
+    """
+    Мониторинг прогресса генерации билетов через проверку БД
+    Отправляет сообщения каждые 400 билетов и статистику в конце
+    """
+    PROGRESS_INTERVAL = 400  # Сообщение каждые 400 билетов
+    CHECK_INTERVAL = 5  # Проверка каждые 5 секунд
+    MAX_WAIT_TIME = 3600  # Максимальное время ожидания (1 час)
+    
+    last_reported = 0
+    start_time = time.time()
+    errors_collected = []  # Для сбора ошибок из логов (если нужно)
+    
+    try:
+        while True:
+            await asyncio.sleep(CHECK_INTERVAL)
+            
+            # Проверяем прогресс через БД
+            async with async_session() as session:
+                result = await session.execute(
+                    select(Survey).where(
+                        Survey.id.in_(user_ids),
+                        Survey.ticket_generated == True
+                    )
+                )
+                generated_surveys = result.scalars().all()
+                completed = len(generated_surveys)
+            
+            # Отправляем промежуточное сообщение каждые 400 билетов
+            if completed - last_reported >= PROGRESS_INTERVAL:
+                remaining = total_count - completed
+                progress_percent = (completed / total_count) * 100
+                elapsed_time = time.time() - start_time
+                
+                # Примерная скорость генерации
+                if completed > 0:
+                    avg_time_per_ticket = elapsed_time / completed
+                    estimated_remaining_time = avg_time_per_ticket * remaining
+                    time_str = f"~{estimated_remaining_time / 60:.1f} мин" if estimated_remaining_time > 60 else f"~{estimated_remaining_time:.0f} сек"
+                else:
+                    time_str = "расчет..."
+                
+                await message.answer(
+                    f"📊 **Прогресс генерации билетов**\n\n"
+                    f"✅ Готово: {completed} / {total_count} ({progress_percent:.1f}%)\n"
+                    f"⏳ Осталось: {remaining}\n"
+                    f"⏱ Примерное время до завершения: {time_str}",
+                    parse_mode="Markdown"
+                )
+                last_reported = completed
+            
+            # Проверяем завершение или таймаут
+            elapsed = time.time() - start_time
+            if completed >= total_count:
+                break
+            if elapsed > MAX_WAIT_TIME:
+                await message.answer(
+                    f"⏱ Превышено максимальное время ожидания ({MAX_WAIT_TIME // 60} минут).\n"
+                    f"Текущий прогресс: {completed} / {total_count}",
+                    parse_mode="Markdown"
+                )
+                break
+        
+        # Финальная статистика - проверяем БД еще раз
+        async with async_session() as session:
+            result = await session.execute(
+                select(Survey).where(
+                    Survey.id.in_(user_ids)
+                )
+            )
+            all_surveys = result.scalars().all()
+            
+            success_count = sum(1 for s in all_surveys if s.ticket_generated)
+            error_count = total_count - success_count
+            
+            # Проверяем, есть ли записи с ошибками (билет не сгенерирован, но не отменен)
+            failed_surveys = [
+                s for s in all_surveys 
+                if not s.ticket_generated and not s.ticket_cancelled
+            ]
+        
+        # Формируем финальное сообщение
+        final_message = (
+            f"✅ **Генерация билетов завершена!**\n\n"
+            f"📊 **Статистика:**\n"
+            f"• Всего обработано: {success_count} / {total_count}\n"
+            f"• ✅ Успешно сгенерировано: {success_count}\n"
+            f"• ❌ Не сгенерировано: {error_count}\n"
+        )
+        
+        if error_count > 0 and failed_surveys:
+            final_message += f"\n⚠️ **Проблемные записи (первые 10):**\n"
+            for survey in failed_surveys[:10]:
+                fio = survey.fio or "Без ФИО"
+                tg_id = survey.telegram_id or "Без ID"
+                final_message += f"• ID {survey.id}: {fio} (TG: {tg_id})\n"
+            if len(failed_surveys) > 10:
+                final_message += f"\n... и еще {len(failed_surveys) - 10} записей"
+        
+        await message.answer(final_message, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при мониторинге генерации билетов: {e}", exc_info=True)
+        await message.answer(
+            f"⚠️ Ошибка при мониторинге прогресса:\n`{str(e)}`\n\n"
+            f"Проверь статус вручную: /stats",
+            parse_mode="Markdown"
+        )
+
+
 @dp.message(Command("generate_tickets"))
 async def cmd_generate_tickets(message: Message):
-    """Генерация всех билетов"""
+    """Генерация всех билетов с отслеживанием прогресса"""
     if not is_admin(message.from_user.id):
         await message.answer("❌ У тебя нет доступа к этой команде.")
         return
@@ -124,9 +237,12 @@ async def cmd_generate_tickets(message: Message):
             return
         
         from tasks import generate_ticket
-        task_ids = []
+        from celery import group
+        
+        # Подготавливаем данные для генерации
+        users_data = []
+        user_ids = []
         for user in users:
-            # Собираем данные пользователя для генерации билета
             user_data = {
                 'id': user.id,
                 'telegram_id': user.telegram_id,
@@ -139,19 +255,36 @@ async def cmd_generate_tickets(message: Message):
                 'ticket_type': user.pair_or_single,
                 'partner_fio': user.partner_fio,
             }
-            task = generate_ticket.delay(user.id, user_data)
-            task_ids.append(task.id)
+            users_data.append((user.id, user_data))
+            user_ids.append(user.id)
+        
+        # Запускаем генерацию билетов через Celery
+        from celery import group
+        
+        job = group(
+            generate_ticket.s(user_id, user_data)
+            for user_id, user_data in users_data
+        )
+        group_result = job.apply_async()
+        
+        total_count = len(users)
         
         await message.answer(
-            f"✅ Генерация запущена!\n\n"
-            f"📊 Билетов к генерации: {len(users)}\n"
-            f"⏱ Примерное время: ~{len(users) * 2 / 60:.1f} минут\n\n"
-            f"Проверить статус: /stats",
+            f"✅ **Генерация запущена!**\n\n"
+            f"📊 Билетов к генерации: {total_count}\n"
+            f"⏱ Примерное время: ~{total_count * 2 / 60:.1f} минут\n\n"
+            f"📈 Прогресс будет обновляться каждые 400 билетов\n"
+            f"🔑 Group ID: `{group_result.id}`",
             parse_mode="Markdown"
         )
         
+        # Запускаем мониторинг в фоне (проверяет БД)
+        asyncio.create_task(
+            monitor_ticket_generation(message, user_ids, total_count)
+        )
+        
     except Exception as e:
-        logger.error(f"❌ Generate tickets error: {e}")
+        logger.error(f"❌ Generate tickets error: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка: {str(e)}")
 
 
@@ -219,7 +352,62 @@ async def cmd_broadcast(message: Message):
         
     except Exception as e:
         logger.error(f"❌ Broadcast error: {e}")
-        await message.answer(f"❌ Ошибка: {str(e)}", parse_mode="Markdown")
+
+
+@dp.message(Command("create_google_shit"))
+async def cmd_create_google_sheet(message: Message):
+    """Экспорт данных регистрации в Google Sheets"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ У тебя нет доступа к этой команде.")
+        return
+    
+    # Получаем ID таблицы из переменной окружения или запрашиваем у пользователя
+    spreadsheet_id = os.getenv("GOOGLE_SHEET_ID")
+    
+    if not spreadsheet_id:
+        await message.answer(
+            "❌ Не указан ID Google таблицы.\n\n"
+            "📝 Добавь в .env файл:\n"
+            "GOOGLE_SHEET_ID=твой_id_таблицы\n\n"
+            "🔗 ID можно найти в URL таблицы:\n"
+            "https://docs.google.com/spreadsheets/d/ТУТ_ID_ТАБЛИЦЫ/edit"
+        )
+        return
+    
+    await message.answer("🔄 Начинаю экспорт в Google Sheets...")
+    
+    try:
+        result = await export_to_google_sheets(spreadsheet_id)
+        
+        await message.answer(
+            f"✅ **Экспорт завершен!**\n\n"
+            f"📊 Статистика:\n"
+            f"• Solo (без пары): {result['solo_count']}\n"
+            f"• Duo (с парой): {result['duo_count']}\n"
+            f"• Всего: {result['total']}\n\n"
+            f"📋 Данные экспортированы в листы:\n"
+            f"• `solo` - участники без пары\n"
+            f"• `duo` - участники с парой",
+            parse_mode="Markdown"
+        )
+        
+    except FileNotFoundError as e:
+        await message.answer(
+            f"❌ **Ошибка:** Не найден файл credentials.json\n\n"
+            f"📝 Убедись, что файл находится в корне проекта или укажи путь в переменной окружения:\n"
+            f"GOOGLE_CREDENTIALS_PATH=путь/к/credentials.json"
+        )
+    except Exception as e:
+        logger.error(f"Ошибка при экспорте в Google Sheets: {e}", exc_info=True)
+        await message.answer(
+            f"❌ **Ошибка при экспорте:**\n\n"
+            f"`{str(e)}`\n\n"
+            f"📝 Проверь:\n"
+            f"• Правильность ID таблицы\n"
+            f"• Наличие файла credentials.json\n"
+            f"• Доступы service account к таблице",
+            parse_mode="Markdown"
+        )
 
 
 # ==================== REGISTRATION FLOW ====================
