@@ -289,70 +289,221 @@ async def cmd_generate_tickets(message: Message):
         await message.answer(f"❌ Ошибка: {str(e)}")
 
 
+async def monitor_broadcast_progress(message: Message, user_ids: list, total_count: int):
+    """
+    Мониторинг прогресса рассылки билетов через проверку БД
+    Отправляет сообщения каждые 100 отправленных билетов и статистику в конце
+    """
+    PROGRESS_INTERVAL = 100  # Сообщение каждые 100 билетов
+    CHECK_INTERVAL = 3  # Проверка каждые 3 секунды
+    MAX_WAIT_TIME = 3600  # Максимальное время ожидания (1 час)
+    
+    last_reported = 0
+    start_time = time.time()
+    
+    try:
+        while True:
+            await asyncio.sleep(CHECK_INTERVAL)
+            
+            # Проверяем прогресс через БД
+            async with async_session() as session:
+                result = await session.execute(
+                    select(Survey).where(
+                        Survey.id.in_(user_ids),
+                        Survey.ticket_sent == True
+                    )
+                )
+                sent_surveys = result.scalars().all()
+                sent_count = len(sent_surveys)
+            
+            # Отправляем промежуточное сообщение каждые 100 билетов
+            if sent_count - last_reported >= PROGRESS_INTERVAL:
+                remaining = total_count - sent_count
+                progress_percent = (sent_count / total_count) * 100
+                elapsed_time = time.time() - start_time
+                
+                # Примерная скорость отправки
+                if sent_count > 0:
+                    avg_time_per_ticket = elapsed_time / sent_count
+                    estimated_remaining_time = avg_time_per_ticket * remaining
+                    if estimated_remaining_time > 60:
+                        time_str = f"~{estimated_remaining_time / 60:.1f} мин"
+                    else:
+                        time_str = f"~{estimated_remaining_time:.0f} сек"
+                else:
+                    time_str = "расчет..."
+                
+                await message.answer(
+                    f"📊 **Прогресс рассылки билетов**\n\n"
+                    f"✅ Отправлено: {sent_count} / {total_count} ({progress_percent:.1f}%)\n"
+                    f"⏳ Осталось: {remaining}\n"
+                    f"⏱ Примерное время до завершения: {time_str}",
+                    parse_mode="Markdown"
+                )
+                last_reported = sent_count
+            
+            # Проверяем завершение или таймаут
+            elapsed = time.time() - start_time
+            if sent_count >= total_count:
+                break
+            if elapsed > MAX_WAIT_TIME:
+                await message.answer(
+                    f"⏱ Превышено максимальное время ожидания ({MAX_WAIT_TIME // 60} минут).\n"
+                    f"Текущий прогресс: {sent_count} / {total_count}",
+                    parse_mode="Markdown"
+                )
+                break
+        
+        # Финальная статистика - проверяем БД еще раз
+        async with async_session() as session:
+            result = await session.execute(
+                select(Survey).where(
+                    Survey.id.in_(user_ids)
+                )
+            )
+            all_surveys = result.scalars().all()
+            
+            sent_count = sum(1 for s in all_surveys if s.ticket_sent)
+            error_count = total_count - sent_count
+            
+            # Проверяем, есть ли записи с ошибками (билет готов, но не отправлен)
+            failed_surveys = [
+                s for s in all_surveys 
+                if s.ticket_generated and not s.ticket_sent and not s.ticket_cancelled
+            ]
+            
+            # Получаем статистику о не сгенерированных билетах
+            not_generated_surveys = [
+                s for s in all_surveys
+                if not s.ticket_generated and not s.ticket_cancelled
+            ]
+        
+        elapsed_total = time.time() - start_time
+        elapsed_minutes = int(elapsed_total // 60)
+        elapsed_seconds = int(elapsed_total % 60)
+        
+        # Формируем финальное сообщение
+        final_message = (
+            f"✅ **Рассылка билетов завершена!**\n\n"
+            f"📊 **Статистика:**\n"
+            f"• Всего обработано: {total_count}\n"
+            f"• ✅ Успешно отправлено: {sent_count}\n"
+            f"• ❌ Не отправлено: {error_count}\n"
+        )
+        
+        if not_generated_surveys:
+            final_message += f"• ⚠️ Не сгенерировано: {len(not_generated_surveys)}\n"
+        
+        final_message += (
+            f"\n⏱ **Время выполнения:** {elapsed_minutes} мин {elapsed_seconds} сек\n"
+            f"📈 **Скорость:** ~{sent_count / elapsed_total * 60:.1f} билетов/мин"
+        )
+        
+        if error_count > 0 and failed_surveys:
+            final_message += f"\n\n⚠️ **Проблемные записи (первые 10):**\n"
+            for survey in failed_surveys[:10]:
+                fio = survey.fio or "Без ФИО"
+                tg_id = survey.telegram_id or "Без ID"
+                final_message += f"• ID {survey.id}: {fio} (TG: {tg_id})\n"
+            if len(failed_surveys) > 10:
+                final_message += f"\n... и еще {len(failed_surveys) - 10} записей"
+        
+        if not_generated_surveys:
+            final_message += f"\n\n💡 **Подсказка:** Для генерации оставшихся билетов используй `/generate_tickets`"
+        
+        await message.answer(final_message, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при мониторинге рассылки: {e}", exc_info=True)
+        await message.answer(
+            f"⚠️ Ошибка при мониторинге прогресса:\n`{str(e)}`\n\n"
+            f"Проверь статус вручную: /stats",
+            parse_mode="Markdown"
+        )
+
+
 @dp.message(Command("rass"))
 async def cmd_broadcast(message: Message):
-    """Рассылка билетов"""
+    """Рассылка билетов с подробной статистикой"""
     if not is_admin(message.from_user.id):
         await message.answer("❌ У тебя нет доступа к этой команде.")
         return
     
-    await message.answer("🚀 Проверяю готовность...")
+    await message.answer("🚀 Проверяю готовые билеты...")
     
     try:
         async with async_session() as session:
-            # Проверка: все ли билеты сгенерированы
-            not_generated = await session.execute(
-                select(Survey).where(
-                    (Survey.ticket_cancelled == False) & 
-                    (Survey.ticket_generated == False)
-                )
+            # Получаем статистику
+            total_result = await session.execute(
+                select(Survey).where(Survey.ticket_cancelled == False)
             )
-            not_generated_count = len(not_generated.scalars().all())
+            all_users = total_result.scalars().all()
             
-            if not_generated_count > 0:
-                await message.answer(
-                    f"⚠️ Не все билеты сгенерированы!\n\n"
-                    f"❌ Не сгенерировано: {not_generated_count}\n\n"
-                    f"Сначала запустите: /generate_tickets"
-                )
-                return
+            # Статистика перед рассылкой
+            generated_count = sum(1 for u in all_users if u.ticket_generated)
+            not_generated_count = len(all_users) - generated_count
+            already_sent_count = sum(1 for u in all_users if u.ticket_sent)
             
-            # Получаем пользователей с готовыми билетами
+            # Получаем пользователей с готовыми билетами, которые еще не отправлены
             result = await session.execute(
                 select(Survey).where(
                     (Survey.ticket_cancelled == False) &
                     (Survey.ticket_generated == True) &
-                    (Survey.ticket_sent == False)
+                    (Survey.ticket_sent == False) &
+                    (Survey.ticket_path.isnot(None))
                 )
             )
             users = result.scalars().all()
         
         if not users:
-            await message.answer("✅ Все билеты уже отправлены!")
+            await message.answer(
+                f"✅ **Все готовые билеты уже отправлены!**\n\n"
+                f"📊 **Статистика:**\n"
+                f"• Всего пользователей: {len(all_users)}\n"
+                f"• ✅ Уже отправлено: {already_sent_count}\n"
+                f"• ⚠️ Не сгенерировано: {not_generated_count}",
+                parse_mode="Markdown"
+            )
             return
         
-        # Формируем данные для рассылки (ПРАВИЛЬНАЯ СТРУКТУРА!)
+        # Формируем данные для рассылки
         tickets_to_send = []
+        user_ids = []
         for user in users:
             tickets_to_send.append({
-                'user_id': user.id,              # ✅ user_id (не id!)
+                'user_id': user.id,
                 'telegram_id': user.telegram_id,
-                'ticket_path': user.ticket_path  # ✅ ticket_path!
+                'ticket_path': user.ticket_path
             })
+            user_ids.append(user.id)
         
         from tasks import broadcast_tickets_task
         task = broadcast_tickets_task.delay(tickets_to_send)
         
+        total_count = len(tickets_to_send)
+        
+        # Статистика перед запуском
         await message.answer(
-            f"✅ Рассылка запущена!\n\n"
-            f"📊 Всего пользователей: {len(tickets_to_send)}\n"
-            f"🔑 Task ID: `{task.id}`\n\n"
-            f"⏱ Примерное время: ~{len(tickets_to_send) * 0.05 / 60:.1f} минут",
+            f"✅ **Рассылка запущена!**\n\n"
+            f"📊 **Статистика:**\n"
+            f"• 📤 К отправке: {total_count}\n"
+            f"• ✅ Уже отправлено: {already_sent_count}\n"
+            f"• ⚠️ Не сгенерировано: {not_generated_count}\n"
+            f"• 📈 Всего пользователей: {len(all_users)}\n\n"
+            f"⏱ Примерное время: ~{total_count * 0.05 / 60:.1f} минут\n"
+            f"📊 Прогресс будет обновляться каждые 100 билетов\n"
+            f"🔑 Task ID: `{task.id}`",
             parse_mode="Markdown"
         )
         
+        # Запускаем мониторинг в фоне (проверяет БД)
+        asyncio.create_task(
+            monitor_broadcast_progress(message, user_ids, total_count)
+        )
+        
     except Exception as e:
-        logger.error(f"❌ Broadcast error: {e}")
+        logger.error(f"❌ Broadcast error: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {str(e)}")
 
 
 @dp.message(Command("test_rass"))
