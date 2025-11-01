@@ -4,6 +4,7 @@
 import os
 import gspread
 from google.oauth2.service_account import Credentials
+from google.auth.exceptions import GoogleAuthError
 from db.session import async_session
 from db.models import Survey
 from sqlalchemy import select
@@ -123,8 +124,62 @@ async def export_to_google_sheets(spreadsheet_id: str) -> dict:
                 solo_data.append(user_row)
         
         # Подключаемся к Google Sheets
-        client = get_google_client()
-        spreadsheet = client.open_by_key(spreadsheet_id)
+        try:
+            client = get_google_client()
+            spreadsheet = client.open_by_key(spreadsheet_id)
+        except gspread.exceptions.APIError as e:
+            # Ошибка API - проверяем детали
+            error_msg = str(e)
+            error_response = getattr(e, 'response', None)
+            
+            # Проверяем код ошибки и текст
+            if "403" in error_msg or "API has not been used" in error_msg or "is disabled" in error_msg:
+                raise Exception(
+                    "Google Sheets API не включен в проекте Google Cloud.\n\n"
+                    "📝 Инструкция:\n"
+                    "1. Открой https://console.cloud.google.com/apis/library/sheets.googleapis.com\n"
+                    "2. Выбери проект из credentials.json (project_id в файле)\n"
+                    "3. Нажми 'Включить' (Enable)\n"
+                    "4. Подожди 1-2 минуты и попробуй снова\n\n"
+                    f"💡 Также включи Google Drive API: https://console.cloud.google.com/apis/library/drive.googleapis.com"
+                )
+            elif "access" in error_msg.lower() or "permission" in error_msg.lower() or "403" in error_msg:
+                raise Exception(
+                    "Нет доступа к таблице.\n\n"
+                    "📝 Инструкция:\n"
+                    "1. Открой Google таблицу\n"
+                    "2. Нажми 'Настройки доступа' (Share/Поделиться)\n"
+                    "3. Добавь email из credentials.json (поле 'client_email', обычно заканчивается на @...iam.gserviceaccount.com)\n"
+                    "4. Дай права 'Редактор' (Editor) или 'Владелец' (Owner)\n"
+                    "5. Сохрани и попробуй снова"
+                )
+            else:
+                raise Exception(f"Ошибка Google Sheets API: {error_msg}")
+        except PermissionError as e:
+            # Ошибка доступа (обертка над APIError)
+            error_msg = str(e)
+            if "API has not been used" in error_msg or "is disabled" in error_msg:
+                raise Exception(
+                    "Google Sheets API не включен в проекте Google Cloud.\n\n"
+                    "📝 Инструкция:\n"
+                    "1. Открой https://console.cloud.google.com/apis/library/sheets.googleapis.com\n"
+                    "2. Выбери проект из credentials.json\n"
+                    "3. Нажми 'Включить'\n"
+                    "4. Подожди 1-2 минуты и попробуй снова"
+                )
+            else:
+                raise Exception(
+                    f"Ошибка доступа к Google Sheets: {error_msg}\n\n"
+                    f"Проверь доступы Service Account к таблице."
+                )
+        except GoogleAuthError as e:
+            raise Exception(
+                f"Ошибка аутентификации Google.\n\n"
+                f"Проверь:\n"
+                f"• Файл credentials.json существует и правильный\n"
+                f"• Service Account создан и активирован\n"
+                f"• Детали: {str(e)}"
+            )
         
         # Получаем или создаем листы
         try:

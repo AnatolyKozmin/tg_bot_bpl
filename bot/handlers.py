@@ -395,19 +395,166 @@ async def cmd_create_google_sheet(message: Message):
         await message.answer(
             f"❌ **Ошибка:** Не найден файл credentials.json\n\n"
             f"📝 Убедись, что файл находится в корне проекта или укажи путь в переменной окружения:\n"
-            f"GOOGLE_CREDENTIALS_PATH=путь/к/credentials.json"
-        )
-    except Exception as e:
-        logger.error(f"Ошибка при экспорте в Google Sheets: {e}", exc_info=True)
-        await message.answer(
-            f"❌ **Ошибка при экспорте:**\n\n"
-            f"`{str(e)}`\n\n"
-            f"📝 Проверь:\n"
-            f"• Правильность ID таблицы\n"
-            f"• Наличие файла credentials.json\n"
-            f"• Доступы service account к таблице",
+            f"`GOOGLE_CREDENTIALS_PATH=путь/к/credentials.json`",
             parse_mode="Markdown"
         )
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Ошибка при экспорте в Google Sheets: {e}", exc_info=True)
+        
+        # Если в сообщении об ошибке уже есть инструкции, просто отправляем его
+        if "Инструкция:" in error_msg or "Проверь:" in error_msg:
+            await message.answer(
+                f"❌ **Ошибка при экспорте:**\n\n{error_msg}",
+                parse_mode="Markdown"
+            )
+        else:
+            # Общая ошибка с инструкциями
+            await message.answer(
+                f"❌ **Ошибка при экспорте:**\n\n"
+                f"`{error_msg}`\n\n"
+                f"📝 **Проверь:**\n"
+                f"1. Правильность ID таблицы (из URL)\n"
+                f"2. Файл credentials.json существует\n"
+                f"3. Google Sheets API включен: https://console.cloud.google.com/apis/library/sheets.googleapis.com\n"
+                f"4. Service Account имеет доступ к таблице (Share → добавить email)",
+                parse_mode="Markdown"
+            )
+
+
+@dp.message(Command("tickets_count"))
+async def cmd_tickets_count(message: Message):
+    """Показать количество файлов билетов в папке tickets"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ У тебя нет доступа к этой команде.")
+        return
+    
+    import os
+    tickets_dir = "tickets"
+    
+    try:
+        if not os.path.exists(tickets_dir):
+            await message.answer("📁 Папка tickets не найдена.")
+            return
+        
+        # Подсчитываем файлы билетов
+        ticket_files = [f for f in os.listdir(tickets_dir) if f.startswith("ticket_") and f.endswith(".png")]
+        total_files = len(ticket_files)
+        
+        # Размер папки
+        total_size = 0
+        for file in ticket_files:
+            file_path = os.path.join(tickets_dir, file)
+            if os.path.isfile(file_path):
+                total_size += os.path.getsize(file_path)
+        
+        size_mb = total_size / (1024 * 1024)
+        
+        # Проверяем в БД
+        async with async_session() as session:
+            result = await session.execute(
+                select(Survey).where(Survey.ticket_generated == True)
+            )
+            db_tickets = result.scalars().all()
+            db_count = len(db_tickets)
+        
+        await message.answer(
+            f"📊 **Статистика билетов**\n\n"
+            f"📁 Файлов в папке: {total_files}\n"
+            f"💾 Размер папки: {size_mb:.2f} MB\n"
+            f"🗄️ В базе данных: {db_count} записей\n\n"
+            f"📝 Путь: `{os.path.abspath(tickets_dir)}`",
+            parse_mode="Markdown"
+        )
+        
+    except Exception as e:
+        logger.error(f"Ошибка при подсчете билетов: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@dp.message(Command("delete_ticket"))
+async def cmd_delete_ticket(message: Message):
+    """Удалить билет по Telegram ID"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ У тебя нет доступа к этой команде.")
+        return
+    
+    # Получаем аргумент команды (telegram_id)
+    command_args = message.text.split()[1:] if len(message.text.split()) > 1 else []
+    
+    if not command_args:
+        await message.answer(
+            "❌ Укажи Telegram ID пользователя.\n\n"
+            "📝 Использование:\n"
+            "`/delete_ticket <telegram_id>`\n\n"
+            "Пример:\n"
+            "`/delete_ticket 123456789`",
+            parse_mode="Markdown"
+        )
+        return
+    
+    telegram_id = command_args[0]
+    
+    try:
+        import os
+        
+        # Ищем пользователя в БД
+        async with async_session() as session:
+            result = await session.execute(
+                select(Survey).where(Survey.telegram_id == telegram_id)
+            )
+            survey = result.scalar_one_or_none()
+            
+            if not survey:
+                await message.answer(f"❌ Пользователь с Telegram ID `{telegram_id}` не найден в базе данных.", parse_mode="Markdown")
+                return
+            
+            # Удаляем файл билета
+            ticket_path = survey.ticket_path or f"tickets/ticket_{telegram_id}.png"
+            file_deleted = False
+            
+            if ticket_path and os.path.exists(ticket_path):
+                os.remove(ticket_path)
+                file_deleted = True
+            
+            # Также проверяем стандартный путь
+            standard_path = f"tickets/ticket_{telegram_id}.png"
+            if not file_deleted and os.path.exists(standard_path):
+                os.remove(standard_path)
+                file_deleted = True
+            
+            # Обновляем БД
+            from sqlalchemy import update
+            from datetime import datetime
+            
+            await session.execute(
+                update(Survey)
+                .where(Survey.id == survey.id)
+                .values(
+                    ticket_generated=False,
+                    ticket_path=None,
+                    ticket_generated_at=None,
+                    ticket_cancelled=True,
+                    ticket_cancelled_at=datetime.utcnow()
+                )
+            )
+            await session.commit()
+            
+            fio = survey.fio or "Без ФИО"
+            status_msg = "✅ Файл удален" if file_deleted else "⚠️ Файл не найден"
+            
+            await message.answer(
+                f"✅ **Билет удален**\n\n"
+                f"👤 Пользователь: {fio}\n"
+                f"🆔 Telegram ID: `{telegram_id}`\n"
+                f"📁 {status_msg}\n"
+                f"🗄️ База данных обновлена",
+                parse_mode="Markdown"
+            )
+            
+    except Exception as e:
+        logger.error(f"Ошибка при удалении билета: {e}", exc_info=True)
+        await message.answer(f"❌ Ошибка: {str(e)}")
 
 
 # ==================== REGISTRATION FLOW ====================
