@@ -57,11 +57,11 @@ def get_broadcast_type_keyboard():
 def get_confirm_keyboard():
     """Клавиатура подтверждения рассылки"""
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Отправить всем", callback_data="broadcast_confirm")],
         [
-            InlineKeyboardButton(text="✅ Отправить всем", callback_data="broadcast_confirm"),
-            InlineKeyboardButton(text="✏️ Изменить", callback_data="broadcast_edit")
-        ],
-        [InlineKeyboardButton(text="❌ Отменить", callback_data="broadcast_cancel")]
+            InlineKeyboardButton(text="✏️ Изменить", callback_data="broadcast_edit"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="broadcast_cancel")
+        ]
     ])
 
 
