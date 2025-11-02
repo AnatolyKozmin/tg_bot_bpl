@@ -356,3 +356,165 @@ def generate_tickets_batch(users_data: list):
         'message': f'Ticket generation started for {len(users_data)} users'
     }
 
+
+# ==================== BROADCAST TASKS ====================
+
+@celery_app.task(bind=True, max_retries=3)
+def send_broadcast_message_task(self, user_id: int, telegram_id: str, message_text: str, parse_mode: str = "Markdown"):
+    """
+    Отправляет текстовое сообщение одному пользователю (Celery задача).
+    
+    Args:
+        user_id: ID пользователя в БД
+        telegram_id: Telegram ID пользователя
+        message_text: Текст сообщения
+        parse_mode: Режим парсинга (Markdown, HTML или None)
+    
+    Returns:
+        dict: Результат отправки
+    """
+    try:
+        from bot.sender import send_broadcast_message
+        
+        # Отправляем сообщение (async операция)
+        success, error_msg = asyncio.run(send_broadcast_message(telegram_id, message_text, parse_mode))
+        
+        if success:
+            logger.info(f"✅ Broadcast sent to user {telegram_id} (ID: {user_id})")
+            return {
+                'status': 'success',
+                'user_id': user_id,
+                'telegram_id': telegram_id
+            }
+        else:
+            raise Exception(f"Send failed: {error_msg}")
+            
+    except Exception as exc:
+        logger.error(f"❌ Error sending broadcast to {telegram_id}: {exc}")
+        
+        # Повторная попытка при ошибке
+        if self.request.retries < self.max_retries:
+            logger.info(f"🔄 Retrying broadcast for user {telegram_id}, attempt {self.request.retries + 1}")
+            raise self.retry(exc=exc, countdown=30)
+        else:
+            logger.error(f"💀 Failed permanently for user {telegram_id}")
+            return {
+                'status': 'error',
+                'user_id': user_id,
+                'telegram_id': telegram_id,
+                'error': str(exc)
+            }
+
+
+@celery_app.task(bind=True, max_retries=3)
+def send_broadcast_photo_task(self, user_id: int, telegram_id: str, photo_path: str, caption: str = None, parse_mode: str = "Markdown"):
+    """
+    Отправляет фото с подписью одному пользователю (Celery задача).
+    
+    Args:
+        user_id: ID пользователя в БД
+        telegram_id: Telegram ID пользователя
+        photo_path: Путь к файлу изображения
+        caption: Текст подписи
+        parse_mode: Режим парсинга (Markdown, HTML или None)
+    
+    Returns:
+        dict: Результат отправки
+    """
+    try:
+        from bot.sender import send_broadcast_photo
+        
+        # Проверяем существование файла
+        if not os.path.exists(photo_path):
+            raise FileNotFoundError(f"Photo file not found: {photo_path}")
+        
+        # Отправляем фото (async операция)
+        success, error_msg = asyncio.run(send_broadcast_photo(telegram_id, photo_path, caption, parse_mode))
+        
+        if success:
+            logger.info(f"✅ Broadcast photo sent to user {telegram_id} (ID: {user_id})")
+            return {
+                'status': 'success',
+                'user_id': user_id,
+                'telegram_id': telegram_id
+            }
+        else:
+            raise Exception(f"Send failed: {error_msg}")
+            
+    except Exception as exc:
+        logger.error(f"❌ Error sending broadcast photo to {telegram_id}: {exc}")
+        
+        # Повторная попытка при ошибке
+        if self.request.retries < self.max_retries:
+            logger.info(f"🔄 Retrying broadcast photo for user {telegram_id}, attempt {self.request.retries + 1}")
+            raise self.retry(exc=exc, countdown=30)
+        else:
+            logger.error(f"💀 Failed permanently for user {telegram_id}")
+            return {
+                'status': 'error',
+                'user_id': user_id,
+                'telegram_id': telegram_id,
+                'error': str(exc)
+            }
+
+
+@celery_app.task
+def mass_broadcast_task(users_list: list, message_text: str = None, photo_path: str = None, caption: str = None, parse_mode: str = "Markdown"):
+    """
+    Запускает массовую рассылку сообщений всем пользователям.
+    Может отправлять текст или фото с подписью.
+    
+    Args:
+        users_list: Список [{'user_id': int, 'telegram_id': str}, ...]
+        message_text: Текст сообщения (если отправляем текст)
+        photo_path: Путь к изображению (если отправляем фото)
+        caption: Подпись к фото
+        parse_mode: Режим парсинга (Markdown, HTML или None)
+    
+    Returns:
+        dict: Статус запуска рассылки
+    """
+    from celery import group
+    
+    logger.info(f"📢 Starting mass broadcast for {len(users_list)} users")
+    logger.info(f"📝 Message type: {'photo' if photo_path else 'text'}")
+    
+    # Создаем группу задач для отправки
+    tasks_list = []
+    
+    if photo_path:
+        # Рассылка фото
+        for user in users_list:
+            task_sig = send_broadcast_photo_task.s(
+                user['user_id'],
+                user['telegram_id'],
+                photo_path,
+                caption,
+                parse_mode
+            )
+            tasks_list.append(task_sig)
+    else:
+        # Рассылка текста
+        for user in users_list:
+            task_sig = send_broadcast_message_task.s(
+                user['user_id'],
+                user['telegram_id'],
+                message_text,
+                parse_mode
+            )
+            tasks_list.append(task_sig)
+    
+    logger.info(f"📋 Total tasks created: {len(tasks_list)}")
+    
+    # Запускаем группу задач
+    job = group(tasks_list)
+    result = job.apply_async()
+    
+    logger.info(f"🚀 Mass broadcast group started, result ID: {result.id if hasattr(result, 'id') else 'N/A'}")
+    
+    return {
+        'status': 'started',
+        'total_users': len(users_list),
+        'message_type': 'photo' if photo_path else 'text',
+        'message': f'Mass broadcast started for {len(users_list)} users'
+    }

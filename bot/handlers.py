@@ -542,7 +542,8 @@ async def cmd_broadcast(message: Message):
                 f"📊 **Статистика:**\n"
                 f"• Всего пользователей: {len(all_users)}\n"
                 f"• ✅ Уже отправлено: {already_sent_count}\n"
-                f"• ⚠️ Не сгенерировано: {not_generated_count}",
+                f"• ⚠️ Не сгенерировано: {not_generated_count}\n\n"
+                f"💡 При повторном запуске `/rass` будут отправлены только новые неотправленные билеты.",
                 parse_mode="Markdown"
             )
             return
@@ -571,6 +572,7 @@ async def cmd_broadcast(message: Message):
             f"• ✅ Уже отправлено: {already_sent_count}\n"
             f"• ⚠️ Не сгенерировано: {not_generated_count}\n"
             f"• 📈 Всего пользователей: {len(all_users)}\n\n"
+            f"💡 Отправляются только неотправленные билеты (можно запускать повторно)\n"
             f"⏱ Примерное время: ~{total_count * 0.05 / 60:.1f} минут\n"
             f"📊 Прогресс будет обновляться каждые 100 билетов\n"
             f"🔑 Task ID: `{task.id}`",

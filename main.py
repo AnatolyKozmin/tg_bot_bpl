@@ -32,6 +32,15 @@ async def on_startup():
     except Exception as e:
         logger.error(f"❌ Failed to initialize database: {e}")
         raise
+    
+    # Регистрируем обработчики для массовой рассылки
+    try:
+        from bot.broadcast_handlers import register_broadcast_handlers
+        await register_broadcast_handlers(dp)
+        logger.info("✅ Broadcast handlers registered")
+    except Exception as e:
+        logger.error(f"❌ Failed to register broadcast handlers: {e}")
+        raise
 
 
 async def on_shutdown():
