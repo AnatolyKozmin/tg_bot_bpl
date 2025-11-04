@@ -78,12 +78,72 @@ class SurveyStates(StatesGroup):
     review = State()
 
 
+class SendToUserStates(StatesGroup):
+    """Состояния для отправки файла/картинки конкретному пользователю"""
+    enter_telegram_id = State()
+    upload_file = State()
+    enter_caption = State()
+
+
 # ==================== ADMIN COMMANDS ====================
 
 ADMIN_IDS = [int(id.strip()) for id in os.getenv("ADMIN_IDS", "").split(",") if id.strip()]
 
 def is_admin(user_id: int) -> bool:
     return user_id in ADMIN_IDS
+
+
+@dp.message(Command("help"))
+async def cmd_help(message: Message):
+    """Справка по командам (для админов показывает админские команды)"""
+    if is_admin(message.from_user.id):
+        # Показываем админские команды
+        help_text = (
+            "🔐 **КОМАНДЫ АДМИНИСТРАТОРА**\n\n"
+            
+            "📊 **Статистика:**\n"
+            "• `/stats` - Статистика регистрации\n"
+            "• `/tickets_status` - Статус билетов\n"
+            "• `/tickets_count` - Количество файлов билетов\n\n"
+            
+            "🎫 **Билеты:**\n"
+            "• `/generate_tickets` - Генерация билетов\n"
+            "• `/rass` - Рассылка билетов\n"
+            "• `/test_rass` - Тест рассылки (10 билетов)\n"
+            "• `/delete_ticket <id>` - Удалить билет\n\n"
+            
+            "📤 **Отправка файлов:**\n"
+            "• `/send_to [id]` - Отправить файл пользователю\n"
+            "• `/cancel` - Отменить текущий процесс\n\n"
+            
+            "📢 **Массовая рассылка:**\n"
+            "• `/broadcast` - Рассылка всем (интерактивная)\n"
+            "• `/broadcast_test <текст>` - Тест рассылки\n\n"
+            
+            "📊 **Экспорт:**\n"
+            "• `/create_google_shit` - Экспорт в Google Sheets\n\n"
+            
+            "📚 **Документация:**\n"
+            "• [Отправка файлов](./SEND_TO_USER_GUIDE.md)\n"
+            "• [Массовая рассылка](./BROADCAST_README_RU.md)\n"
+            "• [Все команды админа](./ADMIN_COMMANDS_RU.md)"
+        )
+    else:
+        # Для обычных пользователей
+        help_text = (
+            "ℹ️ **ПОМОЩЬ**\n\n"
+            "👤 **Доступные команды:**\n"
+            "• `/start` - Начать регистрацию или управление билетом\n\n"
+            
+            "📋 Если у тебя уже есть регистрация, используй `/start` чтобы:\n"
+            "• Посмотреть свои данные\n"
+            "• Изменить анкету\n"
+            "• Отменить билет\n\n"
+            
+            "❓ Нужна помощь? Обратись к администратору."
+        )
+    
+    await message.answer(help_text, parse_mode="Markdown")
 
 
 @dp.message(Command("stats"))
@@ -890,6 +950,287 @@ async def cmd_delete_ticket(message: Message):
     except Exception as e:
         logger.error(f"Ошибка при удалении билета: {e}", exc_info=True)
         await message.answer(f"❌ Ошибка: {str(e)}")
+
+
+@dp.message(Command("send_to"))
+async def cmd_send_to(message: Message, state: FSMContext):
+    """Отправка файла или картинки конкретному пользователю по Telegram ID"""
+    if not is_admin(message.from_user.id):
+        await message.answer("❌ У тебя нет доступа к этой команде.")
+        return
+    
+    await state.clear()
+    await state.set_state(SendToUserStates.enter_telegram_id)
+    
+    await message.answer(
+        "📤 **ОТПРАВКА ФАЙЛА ПОЛЬЗОВАТЕЛЮ**\n\n"
+        "Введи Telegram ID получателя:\n\n"
+        "📝 Примеры:\n"
+        "• `123456789`\n"
+        "• Или используй `/send_to 123456789` сразу с ID\n\n"
+        "❌ Отмена: /cancel",
+        parse_mode="Markdown"
+    )
+    
+    # Проверяем, был ли указан ID сразу в команде
+    command_args = message.text.split()[1:] if len(message.text.split()) > 1 else []
+    if command_args:
+        telegram_id = command_args[0].strip()
+        # Проверяем, что это число
+        if telegram_id.isdigit():
+            # Проверяем, существует ли пользователь
+            async with async_session() as session:
+                result = await session.execute(
+                    select(Survey).where(Survey.telegram_id == telegram_id)
+                )
+                user = result.scalar_one_or_none()
+            
+            if not user:
+                await message.answer(
+                    f"⚠️ Пользователь с Telegram ID `{telegram_id}` не найден в базе данных.\n\n"
+                    f"Продолжить отправку? (файл будет отправлен напрямую по ID)\n"
+                    f"Или введи другой ID:",
+                    parse_mode="Markdown"
+                )
+                await state.update_data(telegram_id=telegram_id, user_found=False)
+            else:
+                await state.update_data(telegram_id=telegram_id, user_found=True, user_fio=user.fio)
+                await state.set_state(SendToUserStates.upload_file)
+                
+                fio = user.fio or "Без ФИО"
+                await message.answer(
+                    f"✅ Пользователь найден:\n"
+                    f"👤 {fio}\n"
+                    f"🆔 Telegram ID: `{telegram_id}`\n\n"
+                    f"📎 Теперь отправь файл или картинку:\n\n"
+                    f"❌ Отмена: /cancel",
+                    parse_mode="Markdown"
+                )
+
+
+@dp.message(SendToUserStates.enter_telegram_id)
+async def enter_telegram_id_handler(message: Message, state: FSMContext):
+    """Обработка ввода Telegram ID"""
+    telegram_id = message.text.strip()
+    
+    # Проверяем формат
+    if not telegram_id.isdigit():
+        await message.answer(
+            "❌ Telegram ID должен содержать только цифры.\n"
+            "Попробуй ещё раз или используй /cancel для отмены."
+        )
+        return
+    
+    # Проверяем, существует ли пользователь в БД
+    async with async_session() as session:
+        result = await session.execute(
+            select(Survey).where(Survey.telegram_id == telegram_id)
+        )
+        user = result.scalar_one_or_none()
+    
+    if not user:
+        await message.answer(
+            f"⚠️ Пользователь с Telegram ID `{telegram_id}` не найден в базе данных.\n\n"
+            f"Продолжить отправку? (файл будет отправлен напрямую по ID)",
+            parse_mode="Markdown"
+        )
+        await state.update_data(telegram_id=telegram_id, user_found=False)
+    else:
+        fio = user.fio or "Без ФИО"
+        await message.answer(
+            f"✅ Пользователь найден:\n"
+            f"👤 {fio}\n"
+            f"🆔 Telegram ID: `{telegram_id}`",
+            parse_mode="Markdown"
+        )
+        await state.update_data(telegram_id=telegram_id, user_found=True, user_fio=user.fio)
+    
+    await state.set_state(SendToUserStates.upload_file)
+    await message.answer(
+        "📎 Теперь отправь файл или картинку:\n\n"
+        "✅ Поддерживаются:\n"
+        "• Фото (изображения)\n"
+        "• Документы (PDF, DOC, XLS и т.д.)\n"
+        "• Видео\n"
+        "• Аудио\n\n"
+        "❌ Отмена: /cancel"
+    )
+
+
+@dp.message(SendToUserStates.upload_file)
+async def upload_file_handler(message: Message, state: FSMContext):
+    """Обработка загрузки файла или картинки"""
+    data = await state.get_data()
+    telegram_id = data.get('telegram_id')
+    user_fio = data.get('user_fio', 'Пользователь')
+    
+    # Определяем тип контента
+    if message.photo:
+        file_type = "photo"
+        file_id = message.photo[-1].file_id
+        await state.update_data(file_type=file_type, file_id=file_id)
+    elif message.document:
+        file_type = "document"
+        file_id = message.document.file_id
+        file_name = message.document.file_name
+        await state.update_data(file_type=file_type, file_id=file_id, file_name=file_name)
+    elif message.video:
+        file_type = "video"
+        file_id = message.video.file_id
+        await state.update_data(file_type=file_type, file_id=file_id)
+    elif message.audio:
+        file_type = "audio"
+        file_id = message.audio.file_id
+        await state.update_data(file_type=file_type, file_id=file_id)
+    else:
+        await message.answer(
+            "❌ Пожалуйста, отправь фото, документ, видео или аудио.\n"
+            "Или используй /cancel для отмены."
+        )
+        return
+    
+    await state.set_state(SendToUserStates.enter_caption)
+    
+    # Показываем превью
+    file_type_name = {
+        "photo": "🖼 Фото",
+        "document": "📄 Документ",
+        "video": "🎥 Видео",
+        "audio": "🎵 Аудио"
+    }
+    
+    preview_text = (
+        f"✅ Файл получен!\n\n"
+        f"📋 **Информация:**\n"
+        f"• Тип: {file_type_name.get(file_type, 'Файл')}\n"
+        f"• Получатель: {user_fio}\n"
+        f"• Telegram ID: `{telegram_id}`\n\n"
+    )
+    
+    if file_type == "document":
+        preview_text += f"• Имя файла: {file_name}\n\n"
+    
+    preview_text += (
+        "📝 Хочешь добавить подпись?\n\n"
+        "• Отправь текст подписи\n"
+        "• Или отправь `/skip` чтобы отправить без подписи"
+    )
+    
+    await message.answer(preview_text, parse_mode="Markdown")
+
+
+@dp.message(SendToUserStates.enter_caption)
+async def enter_caption_handler(message: Message, state: FSMContext):
+    """Обработка ввода подписи и отправка файла"""
+    data = await state.get_data()
+    telegram_id = data.get('telegram_id')
+    file_type = data.get('file_type')
+    file_id = data.get('file_id')
+    user_fio = data.get('user_fio', 'Пользователь')
+    
+    # Проверяем команду skip
+    caption = None
+    if message.text and message.text.strip().lower() == "/skip":
+        caption = None
+    elif message.text:
+        caption = message.text
+        # Проверка длины подписи
+        if len(caption) > 1024:
+            await message.answer(
+                "❌ Подпись слишком длинная!\n"
+                f"Максимум: 1024 символа\n"
+                f"Сейчас: {len(caption)} символов\n\n"
+                "Попробуй ещё раз или отправь /skip для отправки без подписи."
+            )
+            return
+    else:
+        await message.answer(
+            "❌ Пожалуйста, отправь текст подписи или /skip для пропуска."
+        )
+        return
+    
+    # Отправляем файл пользователю
+    await message.answer("⏳ Отправляю...")
+    
+    try:
+        # Отправляем в зависимости от типа файла
+        if file_type == "photo":
+            await bot.send_photo(
+                chat_id=telegram_id,
+                photo=file_id,
+                caption=caption,
+                parse_mode="Markdown" if caption else None
+            )
+        elif file_type == "document":
+            await bot.send_document(
+                chat_id=telegram_id,
+                document=file_id,
+                caption=caption,
+                parse_mode="Markdown" if caption else None
+            )
+        elif file_type == "video":
+            await bot.send_video(
+                chat_id=telegram_id,
+                video=file_id,
+                caption=caption,
+                parse_mode="Markdown" if caption else None
+            )
+        elif file_type == "audio":
+            await bot.send_audio(
+                chat_id=telegram_id,
+                audio=file_id,
+                caption=caption,
+                parse_mode="Markdown" if caption else None
+            )
+        
+        file_type_name = {
+            "photo": "Фото",
+            "document": "Документ",
+            "video": "Видео",
+            "audio": "Аудио"
+        }
+        
+        await message.answer(
+            f"✅ **{file_type_name.get(file_type, 'Файл')} отправлен!**\n\n"
+            f"👤 Получатель: {user_fio}\n"
+            f"🆔 Telegram ID: `{telegram_id}`\n"
+            f"📝 Подпись: {'Да' if caption else 'Нет'}",
+            parse_mode="Markdown"
+        )
+        
+        logger.info(f"✅ File sent to user: telegram_id={telegram_id}, type={file_type}, admin={message.from_user.id}")
+        
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"❌ Error sending file to {telegram_id}: {e}", exc_info=True)
+        
+        await message.answer(
+            f"❌ **Ошибка при отправке:**\n\n"
+            f"`{error_msg}`\n\n"
+            f"💡 Возможные причины:\n"
+            f"• Пользователь заблокировал бота\n"
+            f"• Неверный Telegram ID\n"
+            f"• Проблема с сетью",
+            parse_mode="Markdown"
+        )
+    
+    await state.clear()
+
+
+@dp.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext):
+    """Отмена текущего процесса"""
+    current_state = await state.get_state()
+    
+    if current_state is None:
+        await message.answer("❌ Нет активных процессов для отмены.")
+        return
+    
+    await state.clear()
+    await message.answer(
+        "✅ Процесс отменен.\n\n"
+        "Используй /send_to для новой отправки."
+    )
 
 
 # ==================== REGISTRATION FLOW ====================
