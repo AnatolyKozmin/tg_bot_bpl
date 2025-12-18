@@ -207,7 +207,8 @@ async def register_broadcast_handlers(dp: Dispatcher):
             "💡 Можешь использовать Markdown форматирование:\n"
             "• `**жирный**` → **жирный**\n"
             "• `*курсив*` → *курсив*\n"
-            "• `` `код` `` → `код`",
+            "• `` `код` `` → `код`\n"
+            "• `||скрытый текст||` → скрытый текст (спойлер)",
             parse_mode="Markdown"
         )
     
@@ -489,7 +490,7 @@ async def register_broadcast_handlers(dp: Dispatcher):
     
     @dp.message(Command("broadcast_test"))
     async def cmd_broadcast_test(message: Message):
-        """Тестовая рассылка - отправляет сообщение только админу"""
+        """Тестовая рассылка - отправляет сообщение только админу с правильной обработкой спойлеров"""
         if not is_admin(message.from_user.id):
             await message.answer("❌ У тебя нет доступа к этой команде.")
             return
@@ -500,21 +501,27 @@ async def register_broadcast_handlers(dp: Dispatcher):
             await message.answer(
                 "❌ Использование:\n"
                 "`/broadcast_test Текст сообщения для теста`\n\n"
-                "Отправит сообщение только тебе (для проверки форматирования)",
+                "Отправит сообщение только тебе (для проверки форматирования)\n\n"
+                "💡 Поддерживает спойлеры: `||скрытый текст||`",
                 parse_mode="Markdown"
             )
             return
         
         test_text = args[1]
         
-        # Отправляем тестовое сообщение
+        # Используем ту же логику обработки спойлеров, что и в реальной рассылке
+        from bot.sender import detect_and_convert_spoilers
+        processed_text, parse_mode = detect_and_convert_spoilers(test_text)
+        
+        # Отправляем тестовое сообщение с правильным форматированием
         await message.answer(
             f"🧪 **ТЕСТОВАЯ РАССЫЛКА**\n\n"
             f"━━━━━━━━━━━━━━━━━\n"
-            f"{test_text}\n"
+            f"{processed_text}\n"
             f"━━━━━━━━━━━━━━━━━\n\n"
-            f"✅ Так будет выглядеть сообщение у получателей",
-            parse_mode="Markdown"
+            f"✅ Так будет выглядеть сообщение у получателей\n"
+            f"📝 Формат: {parse_mode}",
+            parse_mode=parse_mode
         )
     
     

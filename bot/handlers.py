@@ -28,6 +28,7 @@ from db.session import async_session, storage
 from db.registration import try_register, get_registration_stats
 from sqlalchemy import select, update, delete
 from db.models import Survey
+from bot.sender import detect_and_convert_spoilers
 from bot.keyboards import (
     yes_no_kb, is_student_kb, faculty_kb, course_kb, pair_or_single_kb,
     studying_or_graduated_kb, confirm_kb, back_kb, back_reply_kb, review_kb,
@@ -1153,34 +1154,40 @@ async def enter_caption_handler(message: Message, state: FSMContext):
     await message.answer("⏳ Отправляю...")
     
     try:
+        # Обрабатываем подпись: автоматически определяем формат и конвертируем спойлеры
+        processed_caption = caption
+        caption_parse_mode = None
+        if caption:
+            processed_caption, caption_parse_mode = detect_and_convert_spoilers(caption)
+        
         # Отправляем в зависимости от типа файла
         if file_type == "photo":
             await bot.send_photo(
                 chat_id=telegram_id,
                 photo=file_id,
-                caption=caption,
-                parse_mode="Markdown" if caption else None
+                caption=processed_caption,
+                parse_mode=caption_parse_mode if caption else None
             )
         elif file_type == "document":
             await bot.send_document(
                 chat_id=telegram_id,
                 document=file_id,
-                caption=caption,
-                parse_mode="Markdown" if caption else None
+                caption=processed_caption,
+                parse_mode=caption_parse_mode if caption else None
             )
         elif file_type == "video":
             await bot.send_video(
                 chat_id=telegram_id,
                 video=file_id,
-                caption=caption,
-                parse_mode="Markdown" if caption else None
+                caption=processed_caption,
+                parse_mode=caption_parse_mode if caption else None
             )
         elif file_type == "audio":
             await bot.send_audio(
                 chat_id=telegram_id,
                 audio=file_id,
-                caption=caption,
-                parse_mode="Markdown" if caption else None
+                caption=processed_caption,
+                parse_mode=caption_parse_mode if caption else None
             )
         
         file_type_name = {
