@@ -509,18 +509,41 @@ async def register_broadcast_handlers(dp: Dispatcher):
         
         test_text = args[1]
         
+        # Логируем для отладки
+        logger.debug(f"Test text received: {repr(test_text)}")
+        
         # Используем ту же логику обработки спойлеров, что и в реальной рассылке
         from bot.sender import detect_and_convert_spoilers
         processed_text, parse_mode = detect_and_convert_spoilers(test_text)
         
+        # Логируем результат обработки
+        logger.debug(f"Processed text: {repr(processed_text)}, parse_mode: {parse_mode}")
+        
+        # Формируем обертку в том же формате, что и основной текст
+        if parse_mode == "HTML":
+            # Если используется HTML, конвертируем обертку тоже в HTML
+            wrapper = (
+                "🧪 <b>ТЕСТОВАЯ РАССЫЛКА</b>\n\n"
+                "━━━━━━━━━━━━━━━━━\n"
+                f"{processed_text}\n"
+                "━━━━━━━━━━━━━━━━━\n\n"
+                "✅ Так будет выглядеть сообщение у получателей\n"
+                f"📝 Формат: {parse_mode}"
+            )
+        else:
+            # Если используется Markdown, используем Markdown форматирование
+            wrapper = (
+                f"🧪 **ТЕСТОВАЯ РАССЫЛКА**\n\n"
+                f"━━━━━━━━━━━━━━━━━\n"
+                f"{processed_text}\n"
+                f"━━━━━━━━━━━━━━━━━\n\n"
+                f"✅ Так будет выглядеть сообщение у получателей\n"
+                f"📝 Формат: {parse_mode}"
+            )
+        
         # Отправляем тестовое сообщение с правильным форматированием
         await message.answer(
-            f"🧪 **ТЕСТОВАЯ РАССЫЛКА**\n\n"
-            f"━━━━━━━━━━━━━━━━━\n"
-            f"{processed_text}\n"
-            f"━━━━━━━━━━━━━━━━━\n\n"
-            f"✅ Так будет выглядеть сообщение у получателей\n"
-            f"📝 Формат: {parse_mode}",
+            wrapper,
             parse_mode=parse_mode
         )
     

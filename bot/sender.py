@@ -134,7 +134,9 @@ def detect_and_convert_spoilers(text: str) -> tuple[str, str]:
         return text, "HTML"
     
     # Проверяем наличие Markdown спойлеров ||текст||
-    if re.search(r'\|\|.*?\|\|', text):
+    # Используем более надежное регулярное выражение
+    spoiler_pattern = r'\|\|.*?\|\|'
+    if re.search(spoiler_pattern, text, re.DOTALL):
         # Сохраняем спойлеры во временные плейсхолдеры, чтобы не сломать их при конвертации Markdown
         spoiler_placeholders = {}
         spoiler_counter = 0
@@ -147,6 +149,7 @@ def detect_and_convert_spoilers(text: str) -> tuple[str, str]:
             return placeholder
         
         # Временно заменяем спойлеры на плейсхолдеры
+        # Используем нежадный поиск для правильной обработки нескольких спойлеров
         text = re.sub(r'\|\|(.*?)\|\|', save_spoiler, text, flags=re.DOTALL)
         
         # Конвертируем Markdown форматирование в HTML
